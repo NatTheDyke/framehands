@@ -99,7 +99,7 @@ class CropPreparation(unittest.TestCase):
                 np.testing.assert_allclose(a[0], b[0], atol=1e-13)
                 self.assertAlmostEqual(a[1], b[1], delta=1e-13)
                 np.testing.assert_allclose(a[2], b[2], atol=1e-6)
-                np.testing.assert_array_equal(a[3], b[3])
+                np.testing.assert_allclose(a[3], b[3], rtol=0, atol=1e-12)   # exact on x86-64 Python
 
     def test_direction_matches_original(self):
         for v in ([0, 0, -1], [0, 0, 1], [1e-9, 0, 1], [0.3, -0.2, -0.9], [0.5, 0.5, 0.1]):

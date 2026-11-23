@@ -1,7 +1,8 @@
 """The C++ geometry core (framehands._core) against the Python reference.
 
 Exact where the Python is scalar arithmetic or elementwise numpy; otherwise (numpy hands
-matrix products and 1-D norms to BLAS, and einsum sums in its own order) within 1e-12. The
+matrix products and 1-D norms to BLAS, and einsum sums in its own order) within 1e-12. On
+aarch64 OpenBLAS's dot products use fused multiply-adds, so there "exact" is also within 1e-12. The
 end-to-end check is a recording replay with FRAMEHANDS_CORE=native: same decisions, joints within
 float64 rounding. Skipped when the module is not built (tools/build_core.py)."""
 from concurrent.futures import Future
@@ -9,6 +10,8 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
+
+import platform
 
 import numpy as np
 
@@ -25,6 +28,15 @@ except ImportError:   # cv2 missing
     M = None
 
 TOL = 1e-12
+EXACT = platform.machine() == "x86_64"
+
+
+def same(a, b, err_msg=""):
+    """bit-identical on x86-64; within TOL where numpy's BLAS fuses multiply-adds (aarch64)"""
+    if EXACT:
+        np.testing.assert_array_equal(a, b, err_msg=err_msg)
+    else:
+        np.testing.assert_allclose(np.asarray(a, float), np.asarray(b, float), rtol=0, atol=TOL, err_msg=err_msg)
 
 
 def camera(fx=600.3, cx=1231.2, cy=1229.7, k=(0.041, -0.012, 0.003, -0.0004)):
@@ -51,11 +63,11 @@ class CalibTests(unittest.TestCase):
         with python_only():
             P = rng.normal(0, 0.2, (500, 3)) + [0, 0, 0.5]
             uv = rng.uniform(0, 2464, (500, 2))
-            np.testing.assert_array_equal(cam.project(P), native(cam).project(P))
-            np.testing.assert_array_equal(cam.unproject(uv), native(cam).unproject(uv))
+            same(cam.project(P), native(cam).project(P))
+            same(cam.unproject(uv), native(cam).unproject(uv))
             o1, d1, o2, d2 = (rng.normal(size=(50, 3)) for _ in range(4))
             for a, b in zip(calib.triangulate(o1, d1, o2, d2), C.triangulate(o1, d1, o2, d2)):
-                np.testing.assert_array_equal(a, b)
+                same(a, b)
 
     def test_det_map_is_exact(self):
         from framehands import source
@@ -66,8 +78,8 @@ class CalibTests(unittest.TestCase):
             for slot in (0, 1):
                 a = src.raw_to_det(raw, slot, 640)
                 m = C.DetMap(src.n, 640, src.x0, src.y0, src._rot(slot))
-                np.testing.assert_array_equal(a, m.raw_to_det(raw))
-                np.testing.assert_array_equal(src.det_to_raw(a, slot, 640), m.det_to_raw(a))
+                same(a, m.raw_to_det(raw))
+                same(src.det_to_raw(a, slot, 640), m.det_to_raw(a))
 
 
 @unittest.skipIf(C is None or M is None, "needs framehands._core and cv2")
@@ -85,8 +97,8 @@ class MercuryTests(unittest.TestCase):
                     b = C.make_instructions(J, flip, expand, twist)
                     np.testing.assert_allclose(a[0], b[0], rtol=0, atol=TOL)
                     self.assertAlmostEqual(float(a[1]), b[1], delta=TOL)
-                    np.testing.assert_array_equal(a[2], b[2])
-                    np.testing.assert_array_equal(a[3], b[3])
+                    same(a[2], b[2])
+                    same(a[3], b[3])
 
     def keypoint(self, cam):
         mk = object.__new__(M.MercuryKeypoint)
@@ -100,7 +112,7 @@ class MercuryTests(unittest.TestCase):
         with python_only():
             for J, flip in self.hands(40, 3):
                 q, r, _, _ = M.make_instructions(J, flip)
-                np.testing.assert_array_equal(mk.crop_pixels(0, q, r, flip), C.crop_pixels(native(cam), q, r, flip))
+                same(mk.crop_pixels(0, q, r, flip), C.crop_pixels(native(cam), q, r, flip))
 
     def test_decode(self):
         rng = np.random.default_rng(4)
@@ -119,7 +131,7 @@ class MercuryTests(unittest.TestCase):
                     b = C.decode(out["heatmap_xy"][0], out["heatmap_depth"][0], float(out["scalar_extras"][0][0]),
                                  out["curls"][0], q, r, flip, offset, native(cam))
                     for k in ("conf", "rel_depth", "is_hand", "curls", "curl_var"):
-                        np.testing.assert_array_equal(a[k], b[k], err_msg=k)
+                        same(a[k], b[k], err_msg=k)
                     np.testing.assert_allclose(a["rays"], b["rays"], rtol=0, atol=TOL)
                     np.testing.assert_allclose(a["det_px"], b["raw"], rtol=0, atol=1e-9)   # pixels
 
@@ -141,11 +153,11 @@ class PalmTests(unittest.TestCase):
         with python_only():
             for _ in range(50):
                 W = rng.normal(0, 0.04, (21, 3))
-                np.testing.assert_array_equal(palm.finger_curls(W), C.finger_curls(W))
-                np.testing.assert_array_equal(palm.finger_splays(W), C.finger_splays(W))
+                same(palm.finger_curls(W), C.finger_curls(W))
+                same(palm.finger_splays(W), C.finger_splays(W))
                 R = np.linalg.qr(rng.normal(size=(3, 3)))[0]
                 R *= np.sign(np.linalg.det(R))
-                np.testing.assert_array_equal(palm.quat_from_R(R), C.quat_from_R(R))
+                same(palm.quat_from_R(R), C.quat_from_R(R))
 
     def test_filters(self):
         rng = np.random.default_rng(8)
@@ -153,9 +165,9 @@ class PalmTests(unittest.TestCase):
         ts = list(np.arange(0, 1, 1 / 90)) + [0.5, 1.0, 1.5]       # re-fed / old measurements, then a gap
         for t in ts:
             x = rng.normal(size=3)
-            np.testing.assert_array_equal(a(x, t), b(x, t))
+            same(a(x, t), b(x, t))
         a.set(None), b.set(None)
-        np.testing.assert_array_equal(a(np.ones(3), 2.0), b(np.ones(3), 2.0))
+        same(a(np.ones(3), 2.0), b(np.ones(3), 2.0))
 
     def test_pose_filter_follows_palm_pose(self):
         rng = np.random.default_rng(9)
