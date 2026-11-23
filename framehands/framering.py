@@ -11,6 +11,7 @@ reserved until release() (the job's future is done: the worker no longer reads i
 put() returns None and the caller sends the frames as before.  The worker turns a FrameRef back into
 {slot: frame} with frames(), views on the shared memory (it keeps none after a job).
 """
+import sys
 import threading
 
 import numpy as np
@@ -88,8 +89,13 @@ def frames(imgs):
     shm = _open.get(imgs.name)
     if shm is None:
         # the tracker owns (and unlinks) the segment; keep Python's resource tracker in this process
-        # from unlinking it too when the worker exits
-        shm = shared_memory.SharedMemory(name=imgs.name, track=False)
+        # from unlinking it too when the worker exits. track= is new in 3.13; before that the
+        # pool's workers share the tracker's resource tracker, where attaching registers a name it
+        # already holds (unregistering would drop the tracker's own registration)
+        if sys.version_info >= (3, 13):
+            shm = shared_memory.SharedMemory(name=imgs.name, track=False)
+        else:
+            shm = shared_memory.SharedMemory(name=imgs.name)
         _open[imgs.name] = shm
     pair = 2 * int(np.prod(imgs.shape))
     ring = np.ndarray((shm.size // pair, 2) + imgs.shape, np.uint8, shm.buf)
