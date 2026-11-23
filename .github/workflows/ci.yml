@@ -31,7 +31,13 @@ jobs:
       - name: Build the C++ core
         run: python tools/build_core.py
       - name: Tests
-        run: python -m unittest discover -s tests -v
+        # failures also become annotations, which are readable without signing in to GitHub
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee test.log || {
+            awk '/^(FAIL|ERROR): /{t=$0} /^[A-Za-z.]*(Error|Exception): /{print "::error title=" t "::" $0}' test.log
+            exit 1
+          }
       - name: The wheel carries the built core
         run: |
           python -m pip wheel --no-deps -w dist .
