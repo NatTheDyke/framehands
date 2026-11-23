@@ -143,15 +143,59 @@ def make_instructions(joints_m, flip, expand=EXPAND, twist=0.0):
 
 
 # ---------------------------------------------------------------- model wrapper
-from framenpu.backends import crops_per_call  # noqa: E402  (re-exported for mpworker)
+INFERENCE = {"cpu": "cpu", "framenpu": "device", "service": "service"}   # --merc-inference -> framenpu.open
+
+
+def crops_per_call(backend):
+    """Crops one backend.infer call takes: its max_crops (3, or 4 on a 4-crop FrameNPU image)."""
+    m = getattr(backend, "max_crops", 3)
+    return m if isinstance(m, int) and not isinstance(m, bool) and 1 <= m <= 4 else 3
+
+
+class KeypointView:
+    """One model of a framenpu session (framenpu.open) as a keypoint backend: infer(feeds),
+    max_crops, name (where the model runs now), last_timing, idle, close."""
+
+    def __init__(self, session, model):
+        self.session, self.model = session, model
+
+    @property
+    def name(self):
+        return self.session.backend_of(self.model)
+
+    @property
+    def max_crops(self):
+        return self.session.max_crops(self.model)
+
+    @property
+    def last_timing(self):
+        return getattr(self.session, "last_timing", None)
+
+    def infer(self, feeds):
+        return self.session.infer(self.model, feeds)
+
+    def idle(self):
+        self.session.idle()
+
+    def close(self):
+        self.session.close()
 
 
 class MercuryKeypoint:
     def __init__(self, model_path, rig, slot_cams, det_size, raw_size=2464, threads=1,
-                 backend=None, inference="cpu", framenpu_jobs=None, source=None, npu_socket=None, cell_offset=0.5):
-        from framenpu.backends import make_backend
-        self.backend = backend if backend is not None else make_backend(
-            model_path, threads, inference, framenpu_jobs, npu_socket)
+                 backend=None, inference="cpu", framenpu_jobs=None, source=None, npu_socket=None, cell_offset=0.5,
+                 session=None, model=None):
+        """The model runs in `session` (framenpu.open; `model` its name, default the first),
+        or in a session opened here on model_path (inference: cpu | framenpu, the device in
+        process | service, the NPU service); `backend` (any object with infer(feeds)) replaces
+        both. self.backend is the keypoint model's view of the session."""
+        if backend is None:
+            if session is None:
+                import framenpu
+                session = framenpu.open([(model_path, "mercury-ft7")], INFERENCE[inference],
+                                        jobs=framenpu_jobs, socket=npu_socket, threads=threads)
+            backend = KeypointView(session, model or session.models[0])
+        self.session, self.backend = session, backend
         # source (framehands/source.py) overrides slot_cams / raw_size and supplies the raw <-> det
         # mapping; without it the original passthrough geometry is used.
         self.src = source

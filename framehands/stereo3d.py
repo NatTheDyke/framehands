@@ -100,26 +100,23 @@ class Stereo3D:
         return finish(dict(zip([o.name for o in self.sess.get_outputs()], out)), A0, c0)
 
 
-class ServiceStereo3D:
-    """The 3D stereo student on the DSP through the NPU service (model 1 of the same client as the
-    keypoint model). Any failure latches to the CPU session for this worker's lifetime."""
-    name = "framenpu"
+class SessionStereo3D:
+    """The 3D stereo student as one model of a framenpu session (framenpu.open): on the NPU
+    service when it serves it, else the session's CPU; the session latches its own fallback."""
 
-    def __init__(self, client, cpu_factory):
-        self.client, self.cpu_factory, self.cpu = client, cpu_factory, None
-        self.last_timing = None
+    def __init__(self, session, model):
+        self.session, self.model = session, model
+
+    @property
+    def name(self):
+        return self.session.backend_of(self.model)
+
+    @property
+    def last_timing(self):
+        return getattr(self.session, "last_timing", None)
 
     def run(self, prep0, prep1, place0, right, R10, t10):
-        if self.client is not None:
-            f, A0, c0 = feeds(prep0, prep1, place0, right, R10, t10)
-            try:
-                (named,) = self.client.infer([f], model=1)
-                self.last_timing = self.client.last_timing
-                return finish(named, A0, c0)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("3D student on the NPU disabled; using CPU: %s", exc)
-                self.client, self.name = None, "cpu"
-        if self.cpu is None:
-            self.cpu = self.cpu_factory()
-        return self.cpu.run(prep0, prep1, place0, right, R10, t10)
+        f, A0, c0 = feeds(prep0, prep1, place0, right, R10, t10)
+        (named,) = self.session.infer(self.model, [f])
+        return finish(named, A0, c0)
+
