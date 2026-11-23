@@ -16,6 +16,8 @@ import os
 
 import numpy as np
 
+from framehands import _native
+
 DEFAULT = os.path.expanduser("~/handtrack/data/calib/sensorRigCalibration.json")
 
 
@@ -32,6 +34,7 @@ class KBCamera:
         y = np.cross(z, x)
         self.R_rig = np.stack([x, y, z], 1)              # rig_from_cam rotation
         self.t_rig = np.array(e["position"], float) / 1000.0
+        self._c = None if _native.core is None else _native.core.KBCamera(self.fx, self.fy, self.cx, self.cy, self.k)
 
     def _d(self, th):
         t2 = th * th
@@ -40,6 +43,8 @@ class KBCamera:
     def project(self, P):
         """camera-frame points (N,3) -> pixels (N,2)."""
         P = np.atleast_2d(P)
+        if _native.core is not None and self._c is not None:
+            return self._c.project(P)
         r = np.hypot(P[:, 0], P[:, 1])
         th = np.arctan2(r, P[:, 2])
         d = self._d(th)
@@ -49,6 +54,8 @@ class KBCamera:
     def unproject(self, uv):
         """pixels (N,2) -> unit rays (N,3) in camera frame."""
         uv = np.atleast_2d(np.asarray(uv, float))
+        if _native.core is not None and self._c is not None:
+            return self._c.unproject(uv)
         mx = (uv[:, 0] - self.cx) / self.fx
         my = (uv[:, 1] - self.cy) / self.fy
         d = np.hypot(mx, my)
@@ -102,6 +109,8 @@ class Rig:
 def triangulate(o1, d1, o2, d2):
     """Midpoint of closest approach of rays o+s*d (all (3,) or (N,3)); returns points and gap."""
     o1, d1, o2, d2 = map(np.atleast_2d, (o1, d1, o2, d2))
+    if _native.core is not None:
+        return _native.core.triangulate(*np.broadcast_arrays(o1, d1, o2, d2))
     w = o1 - o2
     a = (d1 * d1).sum(1)
     b = (d1 * d2).sum(1)

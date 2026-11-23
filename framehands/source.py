@@ -27,6 +27,8 @@ import os
 import cv2
 import numpy as np
 
+from framehands import _native
+
 
 def upright_angle(rig, cam_name):
     """Clockwise rotation (deg) that makes head-down point down in this camera's image."""
@@ -64,9 +66,19 @@ class Source:
         return np.array([[c, -s], [s, c]], float)
 
     # ---------------------------------------------------------------- pixel mapping
+    def _detmap(self, slot, S):
+        """the core's raw <-> detector-image map of this slot at size S (cached)"""
+        maps = self.__dict__.setdefault("_detmaps", {})
+        key = (slot, S)
+        if key not in maps:
+            maps[key] = _native.core.DetMap(self.n, S, self.x0, self.y0, self._rot(slot))
+        return maps[key]
+
     def raw_to_det(self, raw, slot, S):
         """Calibrated raw pixels (..., 2) -> detector-image pixels (..., 2)."""
         raw = np.asarray(raw, float)
+        if _native.core is not None:
+            return self._detmap(slot, S).raw_to_det(raw)
         k = self.n / S
         sx = (raw[..., 0] - self.x0 + 0.5) / k - 0.5
         sy = (raw[..., 1] - self.y0 + 0.5) / k - 0.5
@@ -78,6 +90,8 @@ class Source:
     def det_to_raw(self, det, slot, S):
         """Detector-image pixels (..., 2) -> calibrated raw pixels (..., 2)."""
         det = np.asarray(det, float)
+        if _native.core is not None:
+            return self._detmap(slot, S).det_to_raw(det)
         c = (S - 1) / 2.0
         M = self._rot(slot)
         u, v = det[..., 0] - c, det[..., 1] - c

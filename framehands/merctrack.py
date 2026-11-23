@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 
-from framehands import stereo3d
+from framehands import _native, stereo3d
 from framehands.calib import triangulate
 from framehands.palm import PALM_IDX, finger_curls
 
@@ -46,7 +46,7 @@ def view_joints(P, hand_size, origin, rays, rel_depth):
     return origin + rays * (d9 + rel_depth * hand_size)[:, None]
 
 
-class HandState:
+class PyHandState:
     def __init__(self, side, P, t):
         self.side = side
         self.P = np.asarray(P, float)             # (21,3) head frame
@@ -61,6 +61,24 @@ class HandState:
         self.created = t
         self.curls_by_view = {}                   # slot -> (t, mercury curls (5,), variances (5,))
         self.geo_views = {}                       # slot -> (t, origin, rays head frame, Mercury relative depths)
+
+
+class NativeHandState(PyHandState):
+    """HandState whose joints, time, size, velocity and misses live in the C++ core's state
+    (framehands._core.HandState), which placement and observe() read and update."""
+
+    def __init__(self, side, P, t):
+        self._c = _native.core.HandState(np.asarray(P, float), t)
+        super().__init__(side, P, t)
+
+    P = property(lambda self: self._c.P, lambda self, v: setattr(self._c, "P", v))
+    t = property(lambda self: self._c.t, lambda self, v: setattr(self._c, "t", v))
+    hand_size = property(lambda self: self._c.hand_size, lambda self, v: setattr(self._c, "hand_size", v))
+    vel = property(lambda self: self._c.vel, lambda self, v: setattr(self._c, "vel", v))
+    misses = property(lambda self: self._c.misses, lambda self, v: setattr(self._c, "misses", v))
+
+
+HandState = PyHandState if _native.core is None else NativeHandState
 
 
 class MercuryTracker:
@@ -164,14 +182,17 @@ class MercuryTracker:
             P = hs.P
             fp = fast_pos.get(side)
             expand = None
-            if fp is not None:                    # move the ROI with the 60 Hz palm position
+            if _native.core is not None:
+                P, expand = _native.core.place(hs._c, None if fp is None else np.asarray(fp[0], float),
+                                               self.predict_roi, t_cap_ns / 1e9)
+            elif fp is not None:                  # move the ROI with the 60 Hz palm position
                 P = P + (np.asarray(fp[0]) - P[PALM_IDX[:1] + [5, 9, 17]].mean(0))
             elif self.predict_roi:
                 # fast tracker lost the hand (typically a quick slap): put the crop where the hand is
                 # heading, not where it was (bounded extrapolation), and look wider
                 dt = min(max(t_cap_ns / 1e9 - hs.t, 0.0), 0.15)
                 P = P + hs.vel * dt
-            if self.predict_roi:
+            if self.predict_roi and _native.core is None:
                 spd = float(np.linalg.norm(hs.vel))
                 if fp is None or spd > 1.0:
                     expand = 1.7 * (1.35 if fp is None or spd > 2.5 else 1.15)
@@ -301,9 +322,26 @@ class MercuryTracker:
             fp_now = np.asarray(fp_now[0], float) if fp_now is not None else None
             hs.last_rays[slot] = (t, o, rays, fp_now)
             hs.geo_views[slot] = (t, o, rays, np.asarray(r["rel_depth"], float))
+            if _native.core is not None:
+                hs._c.set_view(slot, t, o, rays, fp_now)
             if paired:
                 hs.curls_by_view[slot] = (t, np.asarray(r["curls"], float), np.asarray(r["curl_var"], float))
                 rec["outcome"] = "pair"
+                continue
+            if _native.core is not None:
+                outcome, P, comp = _native.core.observe(hs._c, slot, t, o, rays, np.asarray(r["rel_depth"], float),
+                                                        fp_now, self.stereo_ms, self.stereo_comp)
+                if comp is not None:
+                    rec["comp_mm"] = comp
+                if outcome == "jump":
+                    self.stats["rejected"] += 1
+                    hs.misses += 1
+                    rec["outcome"] = "jump"
+                    continue
+                self.stats[outcome] += 1
+                rec["outcome"] = outcome
+                _native.core.accept(hs._c, P, t)
+                self._accepted(hs, side, slot, r, P, t, rec, job_imgs, out)
                 continue
             other = hs.last_rays.get(1 - slot)
             P = None
@@ -350,29 +388,7 @@ class MercuryTracker:
             else:
                 hs.vel = np.zeros(3)
             hs.P, hs.t, hs.misses = P, t, 0
-            self.stats["accepted"] += 1
-            rec["rq"] = self.palm.raw_quat(side, P)
-            hs.curls_by_view[slot] = (t, np.asarray(r["curls"], float), np.asarray(r["curl_var"], float))
-            if self.curl_source == "mercury":
-                # Mercury's own curl output (consistent across views): variance-weighted mean of fresh views
-                vs = [(c, v) for (tc, c, v) in hs.curls_by_view.values() if t - tc < 0.2] if not self.curl_latest \
-                    else [hs.curls_by_view[slot][1:]]
-                wsum = sum(1 / v for _, v in vs)
-                mc = sum(c / v for c, v in vs) / wsum
-                raw_curls = np.clip(-mc / np.array(CURL_SCALE), 0, 1)
-            else:
-                raw_curls = finger_curls(P)
-            if self.curl_geo:
-                # single-view joints of each fresh view: unlike triangulated joints, whose depth noise
-                # inflates bone angles (open hands read curled), these keep Mercury's own finger depths
-                gv = [hs.geo_views[slot]] if self.curl_latest else \
-                    [v for v in hs.geo_views.values() if t - v[0] < 0.2]
-                g = np.mean([finger_curls(view_joints(P, hs.hand_size, *v[1:])) for v in gv], 0)
-                raw_curls = np.array(raw_curls, float)
-                raw_curls[self.curl_geo] = g[self.curl_geo]
-            curls = self.palm.curl_filt[side](raw_curls, t)
-            pose = self.palm._pose(side, P, t, conf=r["is_hand"]) + (curls,)
-            out[side] = (pose, slot, r["det_px"], t, job_imgs[slot])
+            self._accepted(hs, side, slot, r, P, t, rec, job_imgs, out)
         for side in list(self.hands):
             if t - self.hands[side].t > LOST_AFTER_S:
                 del self.hands[side]
@@ -387,6 +403,32 @@ class MercuryTracker:
                 self.collapsed = drop
                 self.stats["collapses"] = self.stats.get("collapses", 0) + 1
         return out
+
+    def _accepted(self, hs, side, slot, r, P, t, rec, job_imgs, out):
+        """an accepted observation (state already updated): curls and the filtered pose"""
+        self.stats["accepted"] += 1
+        rec["rq"] = self.palm.raw_quat(side, P)
+        hs.curls_by_view[slot] = (t, np.asarray(r["curls"], float), np.asarray(r["curl_var"], float))
+        if self.curl_source == "mercury":
+            # Mercury's own curl output (consistent across views): variance-weighted mean of fresh views
+            vs = [(c, v) for (tc, c, v) in hs.curls_by_view.values() if t - tc < 0.2] if not self.curl_latest \
+                else [hs.curls_by_view[slot][1:]]
+            wsum = sum(1 / v for _, v in vs)
+            mc = sum(c / v for c, v in vs) / wsum
+            raw_curls = np.clip(-mc / np.array(CURL_SCALE), 0, 1)
+        else:
+            raw_curls = finger_curls(P)
+        if self.curl_geo:
+            # single-view joints of each fresh view: unlike triangulated joints, whose depth noise
+            # inflates bone angles (open hands read curled), these keep Mercury's own finger depths
+            gv = [hs.geo_views[slot]] if self.curl_latest else \
+                [v for v in hs.geo_views.values() if t - v[0] < 0.2]
+            g = np.mean([finger_curls(view_joints(P, hs.hand_size, *v[1:])) for v in gv], 0)
+            raw_curls = np.array(raw_curls, float)
+            raw_curls[self.curl_geo] = g[self.curl_geo]
+        curls = self.palm.curl_filt[side](raw_curls, t)
+        pose = self.palm._pose(side, P, t, conf=r["is_hand"]) + (curls,)
+        out[side] = (pose, slot, r["det_px"], t, job_imgs[slot])
 
     # ---- views = "stereo3d" (framehands/stereo3d.py) -------------------------------------------------
     def _submit_s3d(self, imgs, t_cap_ns, fast_pos, anchor_pos, info, raw_imgs):

@@ -15,7 +15,7 @@ import time
 import cv2
 import numpy as np
 
-from framehands import source as camsource
+from framehands import _native, source as camsource
 from framehands.calib import Rig, triangulate
 
 SLOT_CAM = {1: "passthrough_left", 0: "passthrough_right"}   # passthrough source (tools / tests)
@@ -81,6 +81,8 @@ class OneEuro:
 
 
 def quat_from_R(R):
+    if _native.core is not None:
+        return _native.core.quat_from_R(np.asarray(R, float))
     tr = R[0, 0] + R[1, 1] + R[2, 2]
     if tr > 0:
         s = math.sqrt(tr + 1) * 2
@@ -109,6 +111,8 @@ def _ang(a, b):
 
 def finger_curls(W):
     """W: (21,3) MediaPipe world landmarks -> curls [thumb, index, middle, ring, pinky] in 0..1."""
+    if _native.core is not None:
+        return _native.core.finger_curls(np.asarray(W, float))
     out = []
     t = [W[2] - W[1], W[3] - W[2], W[4] - W[3]]
     out.append(min(1.0, max(0.0, (_ang(t[0], t[1]) + _ang(t[1], t[2])) / math.radians(140))))
@@ -131,6 +135,8 @@ _SPLAY_UNIT = math.radians(15.0)
 def finger_splays(P):
     """P: (21,3) joints -> splays [thumb, index, middle, ring, pinky] in -1..1 (thumb not computed: 0).
     A finger curled out of the palm plane has no meaningful sideways angle: it fades to 0."""
+    if _native.core is not None:
+        return _native.core.finger_splays(np.asarray(P, float))
     P = np.asarray(P, float)
     fwd = P[9] - P[0]
     lat = P[5] - P[17]
@@ -165,8 +171,13 @@ class PalmTracker:
         self.src = source or camsource.active()
         self.cam = {s: self.rig.cams[n] for s, n in self.src.slot_cams.items()}
         self.pose = {s: self.rig.head_from_cam(n) for s, n in self.src.slot_cams.items()}
-        self.filt = {side: (OneEuro(), OneEuro(1.0, 0.3), OneEuro(1.0, 0.3)) for side in ("left", "right")}
-        self.curl_filt = {side: OneEuro(1.0, 1.0) for side in ("left", "right")}   # steadier when still
+        if _native.core is not None:   # the core's pose filter; filt holds its three filters (set() reaches them)
+            self._pf = {side: _native.core.PalmFilter() for side in ("left", "right")}
+            self.filt = {side: (f.pos, f.z, f.x) for side, f in self._pf.items()}
+            self.curl_filt = {side: _native.core.OneEuro(1.0, 1.0) for side in ("left", "right")}
+        else:
+            self.filt = {side: (OneEuro(), OneEuro(1.0, 0.3), OneEuro(1.0, 0.3)) for side in ("left", "right")}
+            self.curl_filt = {side: OneEuro(1.0, 1.0) for side in ("left", "right")}   # steadier when still
         self.roll_flip = False   # was a workaround for swapped hand labels (fixed in live.py: mirrored=True)
         self.scale = {}      # per hand: true hand size / MediaPipe model size (learned from stereo frames)
         self.scale_n = {}
@@ -282,6 +293,8 @@ class PalmTracker:
 
     def _axes(self, side, P):
         """Unfiltered palm centre and (x, z) axes from 21 joints."""
+        if _native.core is not None:
+            return _native.core.palm_axes(side == "right", np.asarray(P, float), self.roll_flip)
         wrist, idx, mid, ring, pinky = P[0], P[5], P[9], P[13], P[17]
         centre = (wrist + idx + mid + pinky) / 4
         fwd = (idx + mid + ring + pinky) / 4 - wrist   # wrist -> knuckle line: along the fingers
@@ -300,6 +313,10 @@ class PalmTracker:
         return quat_from_R(np.stack([x, np.cross(z, x), z], 1))
 
     def _pose(self, side, P, t, conf):
+        if _native.core is not None and getattr(self, "_pf", None) is not None:
+            centre, q = self._pf[side](side == "right", np.asarray(P, float), t, self.roll_flip)
+            self.last_good[side] = t
+            return centre, q, conf, P
         centre, x, z = self._axes(side, P)
         fp, fz, fx = self.filt[side]
         centre = fp(centre, t)
@@ -340,7 +357,8 @@ class Bridge:
         self.seq = 0
         self.private_only = private_only
         self.splay = False               # --splay: finger splay from the joints (else 0, as before)
-        self.splay_filt = {side: OneEuro(1.0, 1.0) for side in ("left", "right")}
+        self.splay_filt = {side: (OneEuro if _native.core is None else _native.core.OneEuro)(1.0, 1.0)
+                           for side in ("left", "right")}
         self.lock = threading.Lock()
         threading.Thread(target=self._rx, daemon=True).start()
 

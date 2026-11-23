@@ -18,6 +18,8 @@ import math
 import cv2
 import numpy as np
 
+from framehands import _native
+
 WSIZE = 128
 GRID = 22
 EXPAND = 1.7          # Mercury tuneable dyn_radii_fac default
@@ -109,6 +111,10 @@ def make_instructions(joints_m, flip, expand=EXPAND, twist=0.0):
 
     Same iterations and formulas as Mercury; the joint directions are normalised once and each
     projection is one matrix product (project_unscaled and direction give the same values)."""
+    if _native.core is not None:   # r as np.float64, as below (a Python float would let float32 math stay float32)
+        q, r, kp, rel = _native.core.make_instructions(np.asarray(joints_m, float), bool(flip), float(expand),
+                                                       float(twist))
+        return q, np.float64(r), kp, rel
     dn = joints_m / np.linalg.norm(joints_m, axis=1, keepdims=True)
 
     def project(q):
@@ -244,6 +250,8 @@ class MercuryKeypoint:
         column and sy from the row, so each rotated component is a row term plus a column term.
         Then Mercury -> OpenCV (y, z negated) and the camera's Kannala-Brandt projection."""
         cam = self.cam[slot]
+        if _native.core is not None and getattr(cam, "_c", None) is not None:
+            return _native.core.crop_pixels(cam._c, np.asarray(q, float), float(r), bool(flip))
         a = self.axis * (r if flip else -r)
         b = self.axis * r
         a2, b2 = a * a, b * b
@@ -312,6 +320,13 @@ class MercuryKeypoint:
         slot, img, q, r, flip, _ = prepared
         hm, hd, extras, curls = (outputs[n] for n in (
             "heatmap_xy", "heatmap_depth", "scalar_extras", "curls"))
+        cam = self.cam[slot]
+        if _native.core is not None and getattr(cam, "_c", None) is not None:
+            d = _native.core.decode(hm[0], hd[0], float(extras[0][0]), curls[0], np.asarray(q, float), float(r),
+                                    bool(flip), self.cell_offset, cam._c)
+            d["det_px"] = self.raw_to_det(d.pop("raw"), slot)
+            d["crop"] = img
+            return d
         hm = hm[0].reshape(21, GRID * GRID)
         conf = hm.max(1)
         locs = self._refine_all(hm) - (0.5 - self.cell_offset)

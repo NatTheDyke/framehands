@@ -24,8 +24,26 @@ onnxruntime, or on the Frame's CDSP through the NPU service.
 
     python -m unittest discover -s tests
 
-Status: the Python package is a first cut. A C++ API, so the PC driver or Monado can use it
-directly, is planned.
+## C++ geometry core
+
+`cpp/` holds the geometry of `calib`, `mercury_kp`, `palm` and `merctrack` in plain C++17 with
+no Python dependency (`cpp/include/framehands/core.hpp`): the fisheye camera model and
+triangulation, the detector-image map, Mercury crop placement, sampling map and heatmap
+decode, palm axes, pose filters, finger curls and splays, and the per-hand Mercury state
+(placement, single-view and two-view observation, acceptance). The Python modules stay the
+reference: each C++ function follows one of them in the same evaluation order.
+
+`framehands._core` binds it for Python:
+
+    pip install pybind11
+    python tools/build_core.py
+    FRAMEHANDS_CORE=native python ...      # unset or "python": the Python reference
+
+Parity (`tests/test_core.py`): the camera model, triangulation, crop sampling map, curls,
+splays and filters match bit for bit; the rest (where numpy uses BLAS or einsum) agree within
+1e-12. A full replay of a recording makes the same decisions, with joints within float64
+rounding. Still in Python: frame sources and the frame ring, scheduling, the flow tracker,
+the stereo3d view mode and MediaPipe.
 
 ## License
 
