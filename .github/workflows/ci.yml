@@ -30,7 +30,13 @@ jobs:
         run: python -m pip install "framenpu @ $FRAMENPU" -e . pybind11
       - name: Build the C++ core
         run: python tools/build_core.py
+      - name: Runner CPU
+        run: python -c "from numpy._core._multiarray_umath import __cpu_features__ as f; print('::notice title=CPU::' + (' '.join(k for k, v in f.items() if v and 'AVX512' in k) or 'no AVX-512'))"
       - name: Tests
+        # the core's exactness tests compare against numpy, whose AVX-512 paths for arctan2, sin,
+        # exp etc. differ from the C library in the last bit; GitHub runners vary in having them
+        env:
+          NPY_DISABLE_CPU_FEATURES: AVX512F AVX512CD AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL AVX512_SPR
         # failures also become annotations, which are readable without signing in to GitHub
         run: |
           set -o pipefail
