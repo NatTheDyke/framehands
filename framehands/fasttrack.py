@@ -23,7 +23,7 @@ import math
 import cv2
 import numpy as np
 
-from handtrack.calib import triangulate
+from framehands.calib import triangulate
 
 LM_IDX = [0, 1, 5, 9, 13, 17]       # tracked landmark identities (MediaPipe indices)
 CENTRE_ROWS = [0, 2, 3, 5]          # rows of LM_IDX forming the palm centre (0, 5, 9, 17) as in palm.py
@@ -341,7 +341,7 @@ class FastTracker:
                 pos = P[CENTRE_ROWS].mean(0)
                 q = None
                 if self.orient:
-                    from handtrack.palm import quat_from_R
+                    from framehands.palm import quat_from_R
                     R = palm_frame(side, P[0], P[2], P[3], P[4], P[5], self.palm.roll_flip)
                     q = quat_from_R(R)
                 self._src = "stereo"

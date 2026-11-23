@@ -3,7 +3,7 @@ alternative to MediaPipe discovery (live.py --discover mercury; MediaPipe stays 
 
 The detector answers, per 160x160 crop, a probability, a centre and a size for each side (outputs
 hand_exists, cx, cy, size; index 0 = left, 1 = right).  It only works on upright, tight crops: the
-crops here are fixed squares of the 1024 upright detector image (handtrack.source.det_image), chosen
+crops here are fixed squares of the 1024 upright detector image (framehands.source.det_image), chosen
 offline on Frametop takes (distill det_tile.py / det_tile_report.py): one 640 crop finds 65% of
 hands, two (640 + 384) 81%, four 85%, against MediaPipe's 14% on the same images.
 
@@ -25,7 +25,7 @@ from collections import namedtuple
 import cv2
 import numpy as np
 
-from handtrack.calib import triangulate
+from framehands.calib import triangulate
 
 FULL = 1024               # the detector image the crops are cut from (source.det_image)
 DET = 160                 # the detector's input size
@@ -181,7 +181,7 @@ def untracked(matches, geom, tracked, near=1.0):
 def seed_crop(geom, slot, c, size, k=SEED_K):
     """(q, r) of the keypoint crop centred on FULL det pixel c, k x size det pixels wide, upright
     in the camera (twist 0), in mercury_kp's crop convention."""
-    from handtrack.mercury_kp import _direction
+    from framehands.mercury_kp import _direction
 
     pts = np.array([c, np.asarray(c, float) + [k * size / 2.0, 0.0]])
     rays = geom.cam[slot].unproject(geom.src.det_to_raw(pts, slot, FULL))

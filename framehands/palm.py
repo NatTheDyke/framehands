@@ -4,7 +4,7 @@ UDP bridge that streams it to the PC driver (pcdriver/, FhHandPacket).
 Camera slots (validated against live frames, tools/check_stereo.py):
   shm slot 1 = left camera, slot 0 = right camera; calibration intrinsics apply directly to the
   raw buffer pixels.  Which cameras, and the raw <-> detector-image mapping, come from the active
-  camera source (handtrack/source.py: passthrough or slam).
+  camera source (framehands/source.py: passthrough or slam).
 """
 import math
 import socket
@@ -15,8 +15,8 @@ import time
 import cv2
 import numpy as np
 
-from handtrack import source as camsource
-from handtrack.calib import Rig, triangulate
+from framehands import source as camsource
+from framehands.calib import Rig, triangulate
 
 SLOT_CAM = {1: "passthrough_left", 0: "passthrough_right"}   # passthrough source (tools / tests)
 PALM_IDX = [0, 5, 9, 13, 17]   # wrist + MCPs: rigid-ish palm points
@@ -25,7 +25,7 @@ PALM_IDX = [0, 5, 9, 13, 17]   # wrist + MCPs: rigid-ish palm points
 # ---------------------------------------------------------------- pixel mapping
 def det_to_raw(px, slot, det_size, raw_size=2464):
     """Passthrough only (kept for tools): detector-image pixels -> raw buffer pixels.
-    The tracker itself uses Source.det_to_raw (handtrack/source.py), which covers both sources.
+    The tracker itself uses Source.det_to_raw (framehands/source.py), which covers both sources.
     live.py: small = rotate(resize(raw, det_size), ROTATE[slot]); slot0 rotated CW, slot1 CCW."""
     u, v = px[:, 0], px[:, 1]
     S = det_size

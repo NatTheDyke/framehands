@@ -1,4 +1,4 @@
-"""Mercury-detector discovery (handtrack/mercdet.py): crops, decode, two-camera agreement and the
+"""Mercury-detector discovery (framehands/mercdet.py): crops, decode, two-camera agreement and the
 triangulated seed, on synthetic Kannala-Brandt cameras posed like the SLAM pair (no calibration
 file, no model)."""
 from pathlib import Path
@@ -10,10 +10,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     import cv2
-    from handtrack import mercdet as D
-    from handtrack import mercury_kp as MK
-    from handtrack.calib import KBCamera
-    from handtrack.source import Source
+    from framehands import mercdet as D
+    from framehands import mercury_kp as MK
+    from framehands.calib import KBCamera
+    from framehands.source import Source
 except ImportError as e:                               # cv2 lives on the headset
     D = None
     MISSING = repr(e)

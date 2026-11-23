@@ -50,7 +50,7 @@ class Source:
     # ---------------------------------------------------------------- rotation
     def angle(self, slot):
         if self._angles is None:
-            from handtrack.calib import Rig
+            from framehands.calib import Rig
             rig = Rig()
             self._angles = {s: round(upright_angle(rig, n), 1) for s, n in self.slot_cams.items()}
         return self._angles[slot]

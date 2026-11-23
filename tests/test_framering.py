@@ -8,7 +8,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from handtrack.framering import FrameRing, frames  # noqa: E402
+from framehands.framering import FrameRing, frames  # noqa: E402
 
 SHAPE = (64, 66)
 

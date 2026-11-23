@@ -15,7 +15,7 @@ one instant.  "alternate" (the original) crops one camera per frame and triangul
 other camera's previous result, captured a frame earlier: a moving hand has moved between the two
 views, which puts a triangulated palm 2-7 cm off at 0.3-0.6 m/s (more at distance) and tilts the
 palm when the wrist turns.  "auto" = both when inference is on the NPU, alternate on the CPU.
-"stereo3d" (handtrack/stereo3d.py): both cameras of the same pair for every hand, FeatureNN-style --
+"stereo3d" (framehands/stereo3d.py): both cameras of the same pair for every hand, FeatureNN-style --
 the keypoint model on both crops (same-instant triangulation) plus a 3D stereo student on the pair;
 the 3D hand shape is placed on the triangulated palm centre.
 With stereo_comp the older view's rays are shifted by the palm's motion since its capture
@@ -27,9 +27,9 @@ import time
 
 import numpy as np
 
-from handtrack import stereo3d
-from handtrack.calib import triangulate
-from handtrack.palm import PALM_IDX, finger_curls
+from framehands import stereo3d
+from framehands.calib import triangulate
+from framehands.palm import PALM_IDX, finger_curls
 
 STEREO_MS = 40.0          # other view's rays this fresh -> triangulate joints
 COLLAPSE_M = 0.07         # two tracked hands closer than this (palm centres) = one physical hand
@@ -388,7 +388,7 @@ class MercuryTracker:
                 self.stats["collapses"] = self.stats.get("collapses", 0) + 1
         return out
 
-    # ---- views = "stereo3d" (handtrack/stereo3d.py) -------------------------------------------------
+    # ---- views = "stereo3d" (framehands/stereo3d.py) -------------------------------------------------
     def _submit_s3d(self, imgs, t_cap_ns, fast_pos, anchor_pos, info, raw_imgs):
         """both cameras' crops of every tracked hand from THIS pair (the cameras expose together);
         placement = the hand's joints moved with the 60 Hz palm position, as in submit()."""

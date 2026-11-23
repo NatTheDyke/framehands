@@ -1,4 +1,4 @@
-"""Camera-source geometry (handtrack/source.py): passthrough must match the original formulas exactly,
+"""Camera-source geometry (framehands/source.py): passthrough must match the original formulas exactly,
 slam (arbitrary-angle rotation, non-square sensor) must be self-consistent with its images."""
 import math
 from pathlib import Path
@@ -9,9 +9,9 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from handtrack import source as camsource
-from handtrack.palm import det_to_raw as old_det_to_raw
-from handtrack.source import Source, upright_angle
+from framehands import source as camsource
+from framehands.palm import det_to_raw as old_det_to_raw
+from framehands.source import Source, upright_angle
 
 S = 640
 PT = camsource.SOURCES["passthrough"]
@@ -165,11 +165,11 @@ class MercuryRawCrop(unittest.TestCase):
 
     def test_raw_crop_matches_detector_crop(self):
         try:
-            from handtrack.calib import Rig
+            from framehands.calib import Rig
             rig = Rig()
         except Exception as e:                       # calibration lives on the headset
             self.skipTest("no calibration: %r" % (e,))
-        from handtrack.mercury_kp import MercuryKeypoint, q_mul
+        from framehands.mercury_kp import MercuryKeypoint, q_mul
         mk = MercuryKeypoint(None, rig, SLAM.slot_cams, S, backend=object(), source=SLAM)
         rng = np.random.default_rng(5)
         raw = np.zeros((1024, 1056), np.float32)

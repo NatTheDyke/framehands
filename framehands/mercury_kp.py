@@ -143,16 +143,16 @@ def make_instructions(joints_m, flip, expand=EXPAND, twist=0.0):
 
 
 # ---------------------------------------------------------------- model wrapper
-from handtrack.inference import crops_per_call  # noqa: E402  (re-exported for mpworker)
+from framenpu.backends import crops_per_call  # noqa: E402  (re-exported for mpworker)
 
 
 class MercuryKeypoint:
     def __init__(self, model_path, rig, slot_cams, det_size, raw_size=2464, threads=1,
                  backend=None, inference="cpu", framenpu_jobs=None, source=None, npu_socket=None, cell_offset=0.5):
-        from handtrack.inference import make_backend
+        from framenpu.backends import make_backend
         self.backend = backend if backend is not None else make_backend(
             model_path, threads, inference, framenpu_jobs, npu_socket)
-        # source (handtrack/source.py) overrides slot_cams / raw_size and supplies the raw <-> det
+        # source (framehands/source.py) overrides slot_cams / raw_size and supplies the raw <-> det
         # mapping; without it the original passthrough geometry is used.
         self.src = source
         # heatmap cell convention: Monado's Mercury puts cell j's centre at j + 0.5 (refine below); the

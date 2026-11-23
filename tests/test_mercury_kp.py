@@ -1,4 +1,4 @@
-"""Mercury crop preparation (handtrack/mercury_kp.py): the restructured make_instructions and crop
+"""Mercury crop preparation (framehands/mercury_kp.py): the restructured make_instructions and crop
 map must equal the original formulas (kept here verbatim as references). Synthetic Kannala-Brandt
 cameras, so no calibration file is needed."""
 from pathlib import Path
@@ -10,9 +10,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     import cv2  # noqa: F401
-    from handtrack import mercury_kp as M
-    from handtrack.calib import KBCamera
-    from handtrack.source import Source
+    from framehands import mercury_kp as M
+    from framehands.calib import KBCamera
+    from framehands.source import Source
 except ImportError as e:                               # cv2 lives on the headset
     M = None
     MISSING = repr(e)
