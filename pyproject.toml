@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "framehands"
-version = "0.1.0"
+version = "0.2.0"
 description = "Steam Frame hand tracking: camera frames, Mercury detection and keypoints, temporal tracking"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["numpy", "opencv-python-headless", "framenpu>=0.1,<0.2"]
+dependencies = ["numpy", "opencv-python-headless", "framenpu>=0.2,<0.3"]
 
 [project.optional-dependencies]
 mediapipe = ["mediapipe"]  # framehands.detect, the legacy detector
@@ -20,3 +20,8 @@ Source = "https://github.com/NatTheDyke/framehands"
 
 [tool.setuptools]
 packages = ["framehands"]
+
+# the C++ geometry core when it was built first (python tools/build_core.py); its file name carries
+# the interpreter and platform, so a wheel holding it imports it only where it was built
+[tool.setuptools.package-data]
+framehands = ["_core*.so"]
