@@ -32,7 +32,8 @@ EXACT = platform.machine() == "x86_64"
 
 
 def same(a, b, err_msg=""):
-    """bit-identical on x86-64; within TOL where numpy's BLAS fuses multiply-adds (aarch64)"""
+    """bit-identical on x86-64 with OpenBLAS's Haswell kernel (AVX-512 machines: OPENBLAS_CORETYPE=Haswell);
+    within TOL where numpy's BLAS fuses multiply-adds differently (aarch64)"""
     if EXACT:
         np.testing.assert_array_equal(a, b, err_msg=err_msg)
     else:
