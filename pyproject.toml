@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "framehands"
-version = "0.2.1"
+version = "0.2.2"
 description = "Steam Frame hand tracking: camera frames, Mercury detection and keypoints, temporal tracking"
 readme = "README.md"
 license = "MIT"
