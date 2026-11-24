@@ -9,9 +9,11 @@ permissions:
   contents: read
 
 env:
-  # framenpu 0.3.0 (the newest release this framehands' dependency range allows), by commit
-  FRAMENPU_SHA: 0b944d2c60dce2b329b8752cfadc0490a5bba517
-  FRAMENPU: git+https://github.com/NatTheDyke/framenpu@0b944d2c60dce2b329b8752cfadc0490a5bba517
+  # framenpu 0.4.0 (the newest release this framehands' dependency range allows) and its device
+  # backend framenpu-cdsp 0.1.0, by commit
+  FRAMENPU_SHA: a8f344ed7fca57ce890ad90276e36d1bde31ebbe
+  FRAMENPU_CDSP_SHA: 80ba356fd3c9d55fbf74b46621cd0b0865686060
+  FRAMENPU: git+https://github.com/NatTheDyke/framenpu@a8f344ed7fca57ce890ad90276e36d1bde31ebbe
 
 jobs:
   test:
@@ -51,7 +53,7 @@ jobs:
           python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert any(n.startswith('framehands/_core') for n in names), names"
 
   device-path:
-    # the keypoint path on framenpu's device backend, with framenpu's simulated cdsp plugin (no DSP)
+    # the keypoint path on framenpu's device backend, with framenpu-cdsp's simulated plugin (no DSP)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -63,11 +65,17 @@ jobs:
           ref: ${{ env.FRAMENPU_SHA }}
           path: _framenpu
           persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: NatTheDyke/framenpu-cdsp
+          ref: ${{ env.FRAMENPU_CDSP_SHA }}
+          path: _cdsp
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.14"
-      - name: Install (framenpu from the same commit as its simulated plugin)
-        run: python -m pip install "./_framenpu[cpu]" -e .
+      - name: Install (framenpu-cdsp from the same commit as its simulated plugin)
+        run: python -m pip install "./_framenpu[cpu]" ./_cdsp -e .
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: models
@@ -77,8 +85,8 @@ jobs:
       - name: Device path, Mercury and the ft7 student
         env:
           FRAMENPU_DEVICES: cdsp=sim_plugin:SimPlugin
-          PYTHONPATH: ${{ github.workspace }}/_framenpu/tests
-          FNPU_MERCURY_JOBS: ${{ github.workspace }}/_framenpu/src/framenpu_cdsp/data/mercury
+          PYTHONPATH: ${{ github.workspace }}/_cdsp/tests
+          FNPU_MERCURY_JOBS: ${{ github.workspace }}/_cdsp/src/framenpu_cdsp/data/mercury
         run: |
           for m in grayscale_keypoint_jan18 student_ft7; do
             FNPU_MERCURY_MODEL=$PWD/models/$m.onnx python -m unittest discover -s tests -p test_device_path.py -v

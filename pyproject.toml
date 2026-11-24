@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "framehands"
-version = "0.2.2"
+version = "0.2.3"
 description = "Steam Frame hand tracking: camera frames, Mercury detection and keypoints, temporal tracking"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["numpy", "opencv-python-headless", "framenpu>=0.2,<0.4"]
+dependencies = ["numpy", "opencv-python-headless", "framenpu>=0.2,<0.5"]
 
 [project.optional-dependencies]
 mediapipe = ["mediapipe"]  # framehands.detect, the legacy detector

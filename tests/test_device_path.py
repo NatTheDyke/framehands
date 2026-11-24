@@ -1,9 +1,9 @@
 """framehands' keypoint path on framenpu's device backend, without a DSP.
 
-Runs only with a device plugin that works here, which is framenpu's simulated one in CI:
+Runs only with a device plugin that works here, which is framenpu-cdsp's simulated one in CI:
 
-    FRAMENPU_DEVICES=cdsp=sim_plugin:SimPlugin  PYTHONPATH=<framenpu>/tests
-    FNPU_MERCURY_JOBS=<framenpu>/src/framenpu_cdsp/data/mercury  FNPU_MERCURY_MODEL=<an .onnx>
+    FRAMENPU_DEVICES=cdsp=sim_plugin:SimPlugin  PYTHONPATH=<framenpu-cdsp>/tests
+    FNPU_MERCURY_JOBS=<framenpu-cdsp>/src/framenpu_cdsp/data/mercury  FNPU_MERCURY_MODEL=<an .onnx>
 
 A request the device refuses makes framenpu fall back to the CPU for the session, quietly; this
 checks that the most crops one call takes stay on the device and come back finite."""
