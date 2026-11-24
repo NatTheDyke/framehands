@@ -11,6 +11,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
+import os
 import platform
 
 import numpy as np
@@ -28,12 +29,13 @@ except ImportError:   # cv2 missing
     M = None
 
 TOL = 1e-12
-EXACT = platform.machine() == "x86_64"
+# bit-identical where this was checked (x86-64 dev machines); FRAMEHANDS_CORE_EXACT=0 (CI: GitHub's mixed
+# runner CPUs differ in numpy's BLAS kernel and the last bit of its transcendental functions) uses TOL
+EXACT = platform.machine() == "x86_64" and os.environ.get("FRAMEHANDS_CORE_EXACT", "1") != "0"
 
 
 def same(a, b, err_msg=""):
-    """bit-identical on x86-64 with OpenBLAS's Haswell kernel (AVX-512 machines: OPENBLAS_CORETYPE=Haswell);
-    within TOL where numpy's BLAS fuses multiply-adds differently (aarch64)"""
+    """bit-identical on x86-64 (see EXACT); within TOL where numpy's BLAS fuses multiply-adds (aarch64)"""
     if EXACT:
         np.testing.assert_array_equal(a, b, err_msg=err_msg)
     else:
