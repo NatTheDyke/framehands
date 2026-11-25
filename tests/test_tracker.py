@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
     import cv2  # noqa: F401
     import framehands
-    from framehands import Frame, HandTracker, SharedMemoryCameras, TrackingState, camera, engine, source
+    from framehands import Frame, HandTracker, SharedMemoryCameras, TrackingState, camera, engine, source, tracker
     from framehands.calib import KBCamera
 except ImportError as e:                               # cv2 lives on the headset
     raise unittest.SkipTest(repr(e))
@@ -135,6 +135,21 @@ class TrackerCase(unittest.TestCase):
             self.t += PERIOD
             out = self.tr.update(Frame(self.t, IMG, IMG))
         return {h.side: h for h in out}
+
+    def held(self):
+        futures = []
+
+        class Held:
+            def submit(self, fn, *args):
+                f = Future()
+                futures.append((f, fn, args))
+                return f
+        return Held(), futures
+
+    def finish(self, futures):
+        for f, fn, args in futures:
+            if not f.done():
+                f.set_result(fn(*args))
 
 
 class LifecycleTests(TrackerCase):
@@ -277,21 +292,6 @@ class ControlTests(TrackerCase):
             self.t += PERIOD
             self.step(2)
 
-    def held(self):
-        futures = []
-
-        class Held:
-            def submit(self, fn, *args):
-                f = Future()
-                futures.append((f, fn, args))
-                return f
-        return Held(), futures
-
-    def finish(self, futures):
-        for f, fn, args in futures:
-            if not f.done():
-                f.set_result(fn(*args))
-
     def test_an_answer_for_a_hand_disabled_meanwhile_is_dropped(self):
         ex, futures = self.held()
         self.make(executor=ex)
@@ -345,6 +345,164 @@ class ControlTests(TrackerCase):
         self.tr.reset()
         self.finish(futures)
         self.assertEqual(self.step(1), {})
+
+
+class WorkerTests(TrackerCase):
+    """What a tracker whose inference runs in another process uses."""
+
+    def start(self, **kw):
+        ex, futures = self.held()
+        self.make(executor=ex, **kw)
+        for _ in range(8):
+            self.step()
+            self.finish(futures)
+        return futures
+
+    def test_preflow_sends_the_job_before_the_flow_and_completes_it(self):
+        futures = self.start(preflow=True)
+        seen = []
+        flow_step, submit = self.tr._flow.step, self.tr._mt.submit
+
+        def spy_step(imgs, t):
+            seen.append(("flow", self.tr._mt.pending()))
+            return flow_step(imgs, t)
+
+        def spy_submit(imgs, *a, **kw):
+            seen.append(("submit", imgs is None))
+            return submit(imgs, *a, **kw)
+
+        self.tr._flow.step, self.tr._mt.submit = spy_step, spy_submit
+        for _ in range(12):
+            self.step()
+            self.finish(futures)
+        self.assertIn(("submit", True), seen)                       # before the images exist ...
+        i = seen.index(("submit", True))
+        self.assertEqual(seen[i + 1], ("flow", True))               # ... so the flow ran with it pending
+        self.assertFalse(self.tr._mt.pending())                     # and it was completed
+        self.assertEqual(set(self.step()), {"left", "right"})
+
+    def test_preflow_needs_an_executor(self):
+        with self.assertRaises(ValueError):
+            self.make(preflow=True)
+
+    def test_an_engine_replaces_the_session(self):
+        self.make()
+        eng = self.tr.engine
+        ex, futures = self.held()
+        tr = HandTracker(FakeRig(), engine=eng, executor=ex)
+        self.assertIs(tr.engine, eng)
+        with self.assertRaises(ValueError):
+            HandTracker(FakeRig())
+
+    def test_poll_returns_the_new_curls_between_frames(self):
+        futures = self.start(preflow=True)
+        self.tr.poll()
+        self.assertEqual(self.tr.poll(), ())                        # nothing finished since
+        while not any(not f.done() for f, _, _ in futures):
+            self.step()
+        before = {sd: h.curls.copy() for sd, h in self.tr._returned.items()}
+        self.finish(futures)
+        out = self.tr.poll()
+        self.assertTrue(out)
+        for h in out:
+            self.assertIn(h.side, before)
+            np.testing.assert_array_equal(h.palm_position, self.tr._out_pos[h.side][1])
+            self.assertFalse(h.curls.flags.writeable)
+        self.assertEqual(self.tr.poll(), ())                        # taken once
+
+    def blocked(self, futures):
+        """a frame whose job was due while the one before it was still in flight"""
+        for _ in range(40):
+            self.step()
+            if self.tr._mt.busy() and self.tr._waiting is not None:
+                return
+        self.fail("no frame had to wait")
+
+    def test_poll_sends_the_frame_a_late_job_kept_back(self):
+        futures = self.start(preflow=True, events=True, keypoint_hz=1000.0)
+        self.blocked(futures)
+        n, t = len(futures), self.tr.frame_time_ns
+        self.assertNotEqual(self.tr._last_kp_ns, t)
+        self.tr.poll()
+        self.assertEqual(len(futures), n)                           # the late job is still running
+        self.finish(futures)
+        self.tr.poll()
+        self.assertEqual((len(futures), self.tr._last_kp_ns), (n + 1, t))
+        self.assertFalse(self.tr._mt.pending())                     # its flow exists: nothing to complete
+        self.finish(futures)
+        self.tr.poll()
+        self.assertEqual(len(futures), n + 1)                       # a frame is sent once
+        rec = [e[1] for e in self.tr.take_events() if e[0] == "observation"]
+        self.assertEqual({r["path"] for r in rec if r["t_cap"] == t}, {"early"})
+
+    def test_poll_sends_no_frame_of_stopped_cameras_or_before_a_reset(self):
+        for stop in (lambda: setattr(self.tr, "_wall", self.tr._wall - 0.15), lambda: self.tr.reset()):
+            futures = self.start(keypoint_hz=1000.0)
+            self.blocked(futures)
+            stop()
+            n = len(futures)
+            self.finish(futures)
+            self.tr.poll()
+            self.assertEqual(len(futures), n)
+
+    def test_poll_without_an_executor_does_nothing(self):
+        self.make()
+        self.step(5)
+        self.assertEqual(self.tr.poll(), ())
+
+    def test_a_stopped_camera_releases_the_clocks_once(self):
+        ex, futures = self.held()
+        self.make(executor=ex)
+        for _ in range(8):
+            self.step()
+            self.finish(futures)
+        self.finish(futures)
+        self.tr.poll()
+        n = len(futures)
+        self.tr._wall -= 1.0
+        self.tr.poll()
+        self.assertEqual([f[1] for f in futures[n:]], [self.tr.engine.idle_mercury])
+        self.tr.poll()
+        self.assertEqual(len(futures), n + 1)
+
+    def test_events_are_kept_only_when_asked_and_taken_once(self):
+        futures = self.start(events=True)
+        kinds = {e[0] for e in self.tr.take_events()}
+        self.assertLessEqual({"observation", "keypoints", "discovery"}, kinds)
+        self.assertEqual(self.tr.take_events(), [])
+        self.start()
+        self.assertEqual(self.tr.take_events(), [])
+        del futures
+
+    def test_sources_name_where_a_hand_came_from(self):
+        self.start()
+        self.step(3)
+        self.assertEqual(set(self.tr.sources), {"left", "right"})
+        for s in self.tr.sources.values():
+            self.assertIn(s.position, ("stereo", "mono_ray0", "mono_ray1", "hold", "observation"))
+            self.assertIn(s.orientation, ("avg2", "newest"))
+
+    def test_a_lost_track_is_looked_for_at_once(self):
+        futures = self.start(detect_hz=0.5, redetect_hz=0.5)
+        self.assertGreaterEqual(self.w.detector_runs, 1)
+        self.tr._flow.lost.add(0)
+        n = sum(f[1] == self.w.discover or (len(f[2]) > 3 and f[2][3] is not None) for f in futures)
+        for _ in range(8):
+            self.step()
+            self.finish(futures)
+        n2 = sum(f[1] == self.w.discover or (len(f[2]) > 3 and f[2][3] is not None) for f in futures)
+        self.assertGreater(n2, n)                        # long before 1 / 0.5 Hz
+
+    def test_settings_can_change_while_running(self):
+        self.make()
+        self.step(5)
+        self.tr.smoothing = tracker.Smoothing(axis=None, curl=None)
+        self.assertIsNone(self.tr.smoothing.axis)
+        self.tr.views, self.tr.stereo_comp = "both", False
+        self.assertEqual((self.tr.views, self.tr.stereo_comp), ("both", False))
+        with self.assertRaises(ValueError):
+            self.tr.views = "stereo3d"
+        self.assertEqual(set(self.step(5)), {"left", "right"})
 
 
 class InputTests(TrackerCase):
