@@ -155,6 +155,15 @@ SOURCES = {
                    1e9 / 30.0, upright_from_calib=True),
 }
 
+
+def for_rig(name, rig):
+    """A source of its own for this calibration: SOURCES' entries are shared by the process, and take
+    their angles from the calibration at its default path."""
+    s = SOURCES[name]
+    angles = s._angles if not s._from_calib else {k: round(upright_angle(rig, n), 1) for k, n in s.slot_cams.items()}
+    return Source(s.name, s.shm, s.slot_cams, (s.raw_w, s.raw_h), (s.x0, s.y0, s.n), s.period_ns, angles=angles)
+
+
 ENV = "HANDTRACK_SOURCE"
 
 

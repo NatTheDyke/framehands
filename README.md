@@ -9,8 +9,41 @@ the headset scripts and the PC driver.
 Models run through [FrameNPU](https://github.com/NatTheDyke/framenpu): on the CPU with
 onnxruntime (the `cpu` extra), or on the Frame's CDSP through the NPU service.
 
+## Tracking hands
+
+    import framenpu
+    from framehands import HandTracker, SharedMemoryCameras
+
+    with framenpu.open(["student_ft7.onnx", "grayscale_detection_160x160.onnx"], backend="auto") as session:
+        tracker = HandTracker(calibration="sensorRigCalibration.json", session=session)
+        for frame in SharedMemoryCameras():
+            for hand in tracker.update(frame):
+                print(hand.side, hand.state, hand.palm_position)
+
+`update` takes a `Frame` (capture time, right and left greyscale images: from the headset's camera
+readers, a recording, or any source with the same cameras) and returns a `Hand` for each hand it
+has: `side`, `track_id`, `timestamp_ns`, `state` (`TRACKED`, or `LIMITED` for a held or one-camera
+position, old fingers or an implausible hand), `confidence` (the model's score, not a calibrated probability), 21 `joints`
+and the palm's position and orientation in the head frame (metres; x right, y up, -z forward),
+finger `curls`, and how old each part is. A hand that is gone is not returned; its return has a new
+`track_id`.
+
+`HandTracker` owns discovery, seeding, keypoint tracking, optical flow, identity and loss. The
+application keeps threads and processes (`executor=`; by default `update` waits for its inference),
+thermal policy (`keypoint_hz`, `detect_hz` and the other rates, 0 to pause), `enabled_hands`, and what
+a hand drives. Failed inference calls are raised by `update`. See `framehands/tracker.py` and
+`examples/print_hands.py`.
+
+This API is new and may change before 1.0. The live tracker in steam-frame-hand-tracking does not
+use it yet; it still runs its own loop over the modules below.
+
+## Modules
+
 | Module | What it does |
 | --- | --- |
+| `tracker` | `HandTracker`, `Hand`: the tracking lifecycle |
+| `engine` | Its model work on one framenpu session |
+| `camera` | `Frame`, and the reader of the camera shared memory |
 | `calib` | Rig and fisheye camera models, triangulation |
 | `source`, `camsrc`, `framering` | Camera frames: sources, detector images, the shared-memory frame ring |
 | `mercdet` | Detection: detector crops, decode, two-camera confirmation, seeding |
