@@ -108,3 +108,9 @@ jobs:
           for m in grayscale_keypoint_jan18 student_ft7; do
             FNPU_MERCURY_MODEL=$PWD/models/$m.onnx python -m unittest discover -s tests -p test_device_path.py -v
           done
+
+  integration:
+    # the tracker, this commit, framenpu and framenpu-cdsp together (the tracker's integration/README.md)
+    uses: NatTheDyke/steam-frame-hand-tracking/.github/workflows/integration.yml@main
+    with:
+      framehands: ${{ github.sha }}
