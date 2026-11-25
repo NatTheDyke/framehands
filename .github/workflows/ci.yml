@@ -9,11 +9,11 @@ permissions:
   contents: read
 
 env:
-  # framenpu 0.4.0 (the newest release this framehands' dependency range allows) and its device
-  # backend framenpu-cdsp 0.1.0, by commit
-  FRAMENPU_SHA: a8f344ed7fca57ce890ad90276e36d1bde31ebbe
-  FRAMENPU_CDSP_SHA: 80ba356fd3c9d55fbf74b46621cd0b0865686060
-  FRAMENPU: git+https://github.com/NatTheDyke/framenpu@a8f344ed7fca57ce890ad90276e36d1bde31ebbe
+  # framenpu 0.4.1 (the newest release this framehands' dependency range allows) and its device
+  # backend framenpu-cdsp 0.1.2, by commit
+  FRAMENPU_SHA: 839a986691283dcff2786f9aeff58267d747fd2c
+  FRAMENPU_CDSP_SHA: 5cac3bd0074a498d872fd8452213ec7a9b75c115
+  FRAMENPU: git+https://github.com/NatTheDyke/framenpu@839a986691283dcff2786f9aeff58267d747fd2c
 
 jobs:
   test:
