@@ -193,6 +193,7 @@ class HandTrack:
         self.last_pos = None      # raw (unblended) head-frame position
         self.last_pos_t = 0.0
         self.out_pos = None       # last output (blended)
+        self.out_t = 0.0          # its time
         self.out_q = None
         self.reseeded = False
         self.corr_pos = np.zeros(3)
@@ -235,6 +236,8 @@ class FastTracker:
         ht = self.hands.setdefault(side, HandTrack())
         if not self._agrees(ht, slot, ct, t):
             return
+        if not ht.cams:                               # a new track: its single-camera time starts now
+            ht.mono_since = None
         ht.cams[slot] = ct
         ht.t_confirm = t
         ht.reseeded = True
@@ -412,8 +415,8 @@ class FastTracker:
                 if ht.cams:                       # points no longer trustworthy: drop, re-detect now
                     self.lost.update(ht.cams.keys())
                     ht.cams.clear()
-                if ht.out_pos is not None and t - ht.last_pos_t < 0.3:
-                    out[side] = (ht.out_pos, ht.out_q)    # hold the last output briefly
+                if ht.out_pos is not None and t - ht.out_t < 0.3:
+                    out[side] = (ht.out_pos, ht.out_q)    # hold the last output briefly (never an older one)
                     self.info[side] = {"src": "hold", "t_obs": ht.last_pos_t,
                                        "npts": {sl: 0 for sl in (0, 1)}}
                 continue
@@ -432,7 +435,7 @@ class FastTracker:
             f = math.exp(-(t - ht.corr_t) / self.blend_s) if self.blend_s > 0 else 0.0
             pos_out = pos + ht.corr_pos * f
             q_out = qmul(qpow(ht.corr_q, f), q) if q is not None else None
-            ht.out_pos, ht.out_q = pos_out, q_out
+            ht.out_pos, ht.out_q, ht.out_t = pos_out, q_out, t
             out[side] = (pos_out, q_out)
             self.info[side] = {"src": self._src, "t_obs": t,
                                "npts": {sl: (len(c.lm) + len(c.extra)) for sl, c in ht.cams.items()}}
