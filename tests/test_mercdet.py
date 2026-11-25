@@ -2,6 +2,7 @@
 triangulated seed, on synthetic Kannala-Brandt cameras posed like the SLAM pair (no calibration
 file, no model)."""
 from pathlib import Path
+import platform
 import sys
 import unittest
 
@@ -20,6 +21,16 @@ except ImportError as e:                               # cv2 lives on the headse
 
 SLAM = Source("slam", "/dev/null", {0: "slam_right", 1: "slam_left"}, (1056, 1024), (16, 0, 1024),
               1e9 / 30.0, angles={0: 124.9, 1: -124.2}) if D is not None else None
+
+
+def same_crop(a, b):
+    """bit-identical on x86-64; aarch64 OpenCV rounds a moved warpAffine differently in a few pixels
+    (headset: 1 grey level in at most 0.5% of a noise image's pixels, 0.02% of a smooth one's)"""
+    if platform.machine() == "x86_64":
+        np.testing.assert_array_equal(a, b)
+    else:
+        d = np.abs(a.astype(int) - b.astype(int))
+        assert d.max() <= 1 and (d > 0).mean() < 0.01, (d.max(), (d > 0).mean())
 
 
 def camera(name, fx, cx, cy, k):
@@ -93,12 +104,12 @@ class MercDetTests(unittest.TestCase):
         fs = D.feeds(SLAM, 0, frame, D.LAYOUTS[4])
         self.assertEqual([i for i, _ in fs], [0, 1, 2, 3])
         self.assertEqual([i for i, _ in D.feeds(SLAM, 1, frame, D.LAYOUTS[4], [2])], [2])
-        # each crop is rotated alone, bit-identical to cropping the whole upright image
+        # each crop is rotated alone, as cropping the whole upright image
         for slot in (0, 1):
             up = SLAM.det_image(frame, slot, D.FULL)
             for x, y, w in D.LAYOUTS[4]:
-                np.testing.assert_array_equal(D.upright_region(SLAM, slot, frame, x, y, w), D.crop(up, x, y, w))
-            np.testing.assert_array_equal(D.upright_region(SLAM, slot, frame, 900, -50, 200), D.crop(up, 900, -50, 200))
+                same_crop(D.upright_region(SLAM, slot, frame, x, y, w), D.crop(up, x, y, w))
+            same_crop(D.upright_region(SLAM, slot, frame, 900, -50, 200), D.crop(up, 900, -50, 200))
         v = fs[0][1]["inputImg"]
         self.assertEqual((v.shape, v.dtype), ((1, 1, D.DET, D.DET), np.float32))
         self.assertAlmostEqual(float(v.std()), 0.25, places=4)

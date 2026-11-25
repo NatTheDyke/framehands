@@ -79,7 +79,7 @@ def normalise(img):
 def upright_region(src, slot, frame, x, y, w):
     """The (x, y, w) square of src.det_image(frame, slot, FULL), computed for that square alone:
     the same warpAffine with its output origin moved, bit-identical to cropping the full upright
-    image (a 640 crop rotates 39% of its pixels). Other sources / sizes crop the full image."""
+    image on x86-64 and within 1 grey level on aarch64 (a 640 crop rotates 39% of its pixels). Other sources / sizes crop the full image."""
     f = frame.shape[1] / src.raw_w
     x0, y0, n = (int(round(v * f)) for v in (src.x0, src.y0, src.n))
     a = src.angle(slot)
