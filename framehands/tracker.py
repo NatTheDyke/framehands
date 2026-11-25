@@ -32,6 +32,7 @@ from framehands.calib import Rig
 from framehands.camera import Frame
 from framehands.engine import DET_SIZE, Engine
 from framehands.fasttrack import FastTracker, plausible
+from framehands.flow import FlowImage
 from framehands.merctrack import MercuryTracker
 from framehands.mercsched import FrameGrid, capture_cap_due
 from framehands.palm import OneEuro, PalmTracker
@@ -234,7 +235,7 @@ class HandTracker:
         self._last_ns = frame.timestamp_ns
         t_ns = self._grid.update(frame.timestamp_ns)
         t = t_ns / 1e9
-        imgs = {sl: self.source.det_image(img, sl, DET_SIZE) for sl, img in raw.items()}
+        imgs = {sl: self._flow_image(img, sl) for sl, img in raw.items()}
         pos = self._flow.step(imgs, t)
         self._collect(imgs, t)
         self._take_discovery(imgs, t)
@@ -255,6 +256,9 @@ class HandTracker:
             # last: a worker thread that has work competes with update() for the interpreter lock
             self._start(imgs, raw, t_ns, t, pos)
         return hands
+
+    def _flow_image(self, img, slot):
+        return FlowImage(img, self.source, slot, DET_SIZE)
 
     def _start(self, imgs, raw, t_ns, t, pos):
         self._request_discovery(imgs, raw, t)

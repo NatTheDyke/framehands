@@ -75,8 +75,9 @@ needs a C++17 compiler), so a wheel is for one Python version and platform:
 Parity (`tests/test_core.py`): the camera model, triangulation, crop sampling map, curls,
 splays and filters match bit for bit; the rest (where numpy uses BLAS or einsum) agree within
 1e-12. A full replay of a recording makes the same decisions, with joints within float64
-rounding. Still in Python: frame sources and the frame ring, scheduling, the flow tracker,
-the stereo3d view mode and MediaPipe.
+rounding. `flow_lk` follows points as OpenCV's `calcOpticalFlowPyrLK` does, on pyramids the caller
+keeps (`framehands.flow`; `tests/test_flow.py` compares the two). Still in Python: frame sources and the
+frame ring, scheduling, the flow tracker's logic, the stereo3d view mode and MediaPipe.
 
 ## License
 

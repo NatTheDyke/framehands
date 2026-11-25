@@ -12,7 +12,7 @@ endif()
 # and no reassociation, so results follow the documented evaluation order.
 add_compile_options(-ffp-contract=off -fno-fast-math -Wall -Wextra)
 
-add_library(framehands_core STATIC src/core.cpp)
+add_library(framehands_core STATIC src/core.cpp src/flow.cpp)
 target_include_directories(framehands_core PUBLIC include)
 
 option(FRAMEHANDS_PYTHON "Build the framehands._core Python module" ON)

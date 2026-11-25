@@ -8,12 +8,14 @@
 #include <stdexcept>
 
 #include "framehands/core.hpp"
+#include "framehands/flow.hpp"
 
 namespace py = pybind11;
 namespace fh = framehands;
 
 using F64 = py::array_t<double, py::array::c_style | py::array::forcecast>;
 using F32 = py::array_t<float, py::array::c_style | py::array::forcecast>;
+using U8 = py::array_t<std::uint8_t, 0>;  // an image: any stride, never converted
 
 namespace {
 
@@ -47,6 +49,16 @@ fh::Quat quat(const F64& a) {
 F64 arr(const double* p, std::vector<py::ssize_t> shape) {
     F64 out(shape);
     std::copy(p, p + out.size(), out.mutable_data());
+    return out;
+}
+fh::FlowPyramid pyramid(const std::vector<U8>& levels) {
+    if (levels.empty() || levels.size() > 8) throw std::invalid_argument("pyramid: 1 to 8 levels");
+    fh::FlowPyramid out;
+    for (const auto& a : levels) {
+        if (a.ndim() != 2 || a.shape(0) < 1 || a.shape(1) < 1 || a.strides(1) != 1 || a.strides(0) < a.shape(1))
+            throw std::invalid_argument("pyramid level: a 2-D uint8 image with adjacent columns");
+        out.push_back({a.data(), int(a.shape(1)), int(a.shape(0)), a.strides(0)});
+    }
     return out;
 }
 std::optional<fh::Vec3> opt_vec3(const py::object& o) {
@@ -271,6 +283,28 @@ PYBIND11_MODULE(_core, m) {
         static const char* names[] = {"stereo", "mono", "jump"};
         return py::make_tuple(names[static_cast<int>(o.outcome)], joints_array(o.P),
                               o.comp_mm ? py::object(py::float_(*o.comp_mm)) : py::none());
+    });
+    m.def("flow_lk", [](const std::vector<U8>& prev, const std::vector<U8>& cur, F32 pts, int win, int iterations,
+                        float epsilon, float min_eig) {
+        // image pyramids (cv2.pyrDown of each level) and (n, 2) points -> (next (n, 2) float32, found (n,) bool)
+        fh::FlowPyramid a = pyramid(prev), b = pyramid(cur);
+        if (a.size() != b.size()) throw std::invalid_argument("pyramids differ in levels");
+        for (size_t i = 0; i < a.size(); ++i)
+            if (a[i].w != b[i].w || a[i].h != b[i].h) throw std::invalid_argument("pyramids differ in size");
+        if (pts.ndim() != 2 || pts.shape(1) != 2) throw std::invalid_argument("points: (n, 2)");
+        if (win < 3 || win > fh::kFlowMaxWin || win % 2 == 0) throw std::invalid_argument("window: odd, 3..31");
+        const int n = int(pts.shape(0));
+        F32 next(std::vector<py::ssize_t>{n, 2});
+        py::array_t<bool> found(n);
+        std::vector<std::uint8_t> st(n);
+        const float* in = pts.data();
+        float* out = next.mutable_data();
+        {
+            py::gil_scoped_release nogil;
+            fh::flow_lk(a, b, in, n, out, st.data(), {win, iterations, epsilon, min_eig});
+        }
+        for (int i = 0; i < n; ++i) found.mutable_data()[i] = st[i] != 0;
+        return py::make_tuple(next, found);
     });
     m.def("accept", [](fh::HandState& h, F64 P, double t) { fh::accept(h, joints(P), t); });
 }

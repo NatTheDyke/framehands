@@ -23,6 +23,7 @@ import math
 import cv2
 import numpy as np
 
+from framehands import flow
 from framehands.calib import triangulate
 
 LM_IDX = [0, 1, 5, 9, 13, 17]       # tracked landmark identities (MediaPipe indices)
@@ -35,9 +36,9 @@ FEAT_MARGIN = 16                    # px of image around the hand outline used w
 
 # Nearly all of an LK call's cost is building both images' pyramids and the first image's derivatives:
 # tracking 36 points costs about the same as tracking 1.  So all hands seen by a camera are tracked in
-# one call pair (step_tracks).  Sharing one pyramid per image across calls would save most of the rest,
-# but OpenCV's Python binding takes single images only (prebuilt pyramids are rejected, checked on
-# OpenCV 5.0); that needs a C++ tracker.
+# one call pair (step_tracks).  Images given as flow.FlowImage share one pyramid across calls and, in the
+# core, compute gradients in the windows only; plain arrays (the live tracker's) go through OpenCV.
+MAX_FB = 2.5                        # detector-image px, forward-backward disagreement of a good point
 MAX_SPEED = 4.0                     # m/s; faster apparent motion is a tracking error, not a hand
 MAX_GAP = 0.025                     # m, median ray gap of the triangulated landmarks
 
@@ -94,14 +95,20 @@ def palm_frame(side, wrist, idx, mid, ring, pinky, roll_flip=False):
 class CamTrack:
     """Six identified palm landmarks + anonymous texture points of one hand in one camera."""
 
-    def __init__(self, lm, extra):
+    def __init__(self, lm, extra, view=None):
+        self.view = view          # a FlowImage of this camera (its pixel map), None: detector-image pixels
         self.lm = lm.astype(np.float32).reshape(-1, 2)          # (6,2), identities = LM_IDX
         self.extra = extra.astype(np.float32).reshape(-1, 2)    # (N,2)
         self.ok = True
 
     @property
+    def det_lm(self):
+        """the landmarks in detector-image pixels"""
+        return self.lm if self.view is None else self.view.to_det(self.lm)
+
+    @property
     def centre(self):
-        return self.lm[CENTRE_ROWS].mean(0).astype(np.float64)
+        return self.det_lm[CENTRE_ROWS].mean(0).astype(np.float64)
 
     def points(self):
         return np.vstack([self.lm, self.extra])
@@ -127,6 +134,12 @@ def step_tracks(tracks, prev, cur):
     backward LK call.  LK tracks every point on its own, so each track gets exactly the result it would
     get alone, for about the cost of one track (see the note at LK).  Returns each track's success."""
     pts = [ct.points() for ct in tracks]
+    if isinstance(cur, flow.FlowImage):
+        allp = np.vstack(pts)
+        new, st = flow.track(prev, cur, allp)
+        back, st2 = flow.track(cur, prev, new)
+        good = st & st2 & (np.linalg.norm(back - allp, axis=1) < MAX_FB * cur.scale)
+        return _apply(tracks, pts, new, good)
     allp = np.vstack(pts).reshape(-1, 1, 2)
     nxt, st, _ = cv2.calcOpticalFlowPyrLK(prev, cur, allp, None, **LK)
     if nxt is None:
@@ -135,8 +148,11 @@ def step_tracks(tracks, prev, cur):
         return [False] * len(tracks)
     back, st2, _ = cv2.calcOpticalFlowPyrLK(cur, prev, nxt, None, **LK)   # forward-backward check
     fb = np.linalg.norm((back - allp).reshape(-1, 2), axis=1)
-    good = (st.ravel() == 1) & (st2.ravel() == 1) & (fb < 2.5)
-    new = nxt.reshape(-1, 2)
+    good = (st.ravel() == 1) & (st2.ravel() == 1) & (fb < MAX_FB)
+    return _apply(tracks, pts, nxt.reshape(-1, 2), good)
+
+
+def _apply(tracks, pts, new, good):
     out, i = [], 0
     for ct, p in zip(tracks, pts):
         out.append(ct.update(p, new[i:i + len(p)], good[i:i + len(p)]))
@@ -212,11 +228,7 @@ class FastTracker:
         # the points must refer to the frame the next step() starts from: cur_img, unless the caller
         # skipped step() for this frame (heat), in which case the last frame it did process
         cur_img = self.prev.get(slot, cur_img)
-        lm = hand.px[LM_IDX].astype(np.float32)
-        extra = np.zeros((0, 2), np.float32)
-        if det_img is not None:
-            extra = texture_points(det_img, hand.px)
-        ct = CamTrack(lm, extra)
+        ct = self._track(hand.px, det_img if det_img is not None else cur_img, det_img is not None)
         if det_img is not None and cur_img is not None and det_img is not cur_img:
             if not self._advance(ct, slot, det_img, cur_img):
                 return
@@ -228,6 +240,15 @@ class FastTracker:
         ht.reseeded = True
         if pos3d is not None and plausible(pos3d) and (ht.last_pos is None or t - ht.last_pos_t > 0.3):
             ht.last_pos, ht.last_pos_t = np.asarray(pos3d, float), t
+
+    @staticmethod
+    def _track(px, img, texture):
+        """A CamTrack from the 21 joints px (detector-image pixels) on img."""
+        view, gray = None, img
+        if isinstance(img, flow.FlowImage):
+            view, gray, px = img, img.image, img.from_det(px)
+        extra = texture_points(gray, px) if texture else np.zeros((0, 2), np.float32)
+        return CamTrack(px[LM_IDX].astype(np.float32), extra, view)
 
     def _advance(self, ct, slot, src_img, cur_img):
         """Carry a CamTrack from src_img to cur_img.  v2: through every retained frame in between
@@ -281,11 +302,10 @@ class FastTracker:
         if (((np.asarray(P) - tc) @ R)[:, 2] < 0.08).any():
             return False
         px = self.palm.det_px(slot, np.asarray(P))
-        S = src.shape[0]
+        S = src.det_size if isinstance(src, flow.FlowImage) else src.shape[0]
         if (px < 4).any() or (px > S - 5).any():
             return False
-        lm = px[LM_IDX].astype(np.float32)
-        ct = CamTrack(lm, texture_points(src, px))
+        ct = self._track(px, src, True)
         if not self._advance(ct, slot, src, h[-1][1]):
             return False
         if not self._agrees(ht, slot, ct, h[-1][0]):
@@ -305,8 +325,8 @@ class FastTracker:
         if other is None:
             return True
         c = {slot: ct, 1 - slot: other}
-        o1, d1 = self.palm.rays(1, c[1].lm)
-        o0, d0 = self.palm.rays(0, c[0].lm)
+        o1, d1 = self.palm.rays(1, c[1].det_lm)
+        o0, d0 = self.palm.rays(0, c[0].det_lm)
         P, gap, s1, s0 = triangulate(np.broadcast_to(o1, d1.shape), d1, np.broadcast_to(o0, d0.shape), d0)
         ok = np.median(gap) < MAX_GAP and (s1 > 0.05).all() and (s0 > 0.05).all()
         if ok and ht.last_pos is not None and t - ht.last_pos_t < 0.1:
@@ -334,8 +354,8 @@ class FastTracker:
     def _raw(self, side, ht, t=None):
         """Unblended estimate from the current tracks: (pos, quat or None)."""
         if 0 in ht.cams and 1 in ht.cams:
-            o1, d1 = self.palm.rays(1, ht.cams[1].lm)
-            o0, d0 = self.palm.rays(0, ht.cams[0].lm)
+            o1, d1 = self.palm.rays(1, ht.cams[1].det_lm)
+            o0, d0 = self.palm.rays(0, ht.cams[0].det_lm)
             P, gap, s1, s0 = triangulate(np.broadcast_to(o1, d1.shape), d1, np.broadcast_to(o0, d0.shape), d0)
             if np.median(gap) < MAX_GAP and (s1 > 0.05).all() and (s0 > 0.05).all():
                 pos = P[CENTRE_ROWS].mean(0)
