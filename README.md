@@ -7,7 +7,7 @@ from that repository with its history, which still runs the live tracker, the wo
 the headset scripts and the PC driver.
 
 Models run through [FrameNPU](https://github.com/NatTheDyke/framenpu): on the CPU with
-onnxruntime, or on the Frame's CDSP through the NPU service.
+onnxruntime (the `cpu` extra), or on the Frame's CDSP through the NPU service.
 
 | Module | What it does |
 | --- | --- |
@@ -17,7 +17,7 @@ onnxruntime, or on the Frame's CDSP through the NPU service.
 | `mercury_kp` | Keypoint crop placement and sampling, hint, heatmap decode |
 | `merctrack`, `palm`, `fasttrack` | Temporal state: views, triangulation, flow tracking, palm pose, prediction |
 | `mercsched` | Crop scheduling and cadence |
-| `stereo3d` | 3D joint fitting from the stereo student |
+| `stereo3d` | 3D joint fitting from the stereo student (its CPU session: the `cpu` extra) |
 | `detect` | The legacy MediaPipe detector (the `mediapipe` extra) |
 
 ## Tests
