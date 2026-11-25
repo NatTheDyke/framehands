@@ -6,5 +6,5 @@ dist/
 .venv/
 venv/
 *.onnx
-# the built C++ core module (tools/build_core.py)
+# a C++ core module built in the source tree
 framehands/_core*.so

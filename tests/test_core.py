@@ -4,7 +4,7 @@ Exact where the Python is scalar arithmetic or elementwise numpy; otherwise (num
 matrix products and 1-D norms to BLAS, and einsum sums in its own order) within 1e-12. On
 aarch64 OpenBLAS's dot products use fused multiply-adds, so there "exact" is also within 1e-12. The
 end-to-end check is a recording replay with FRAMEHANDS_CORE=native: same decisions, joints within
-float64 rounding. Skipped when the module is not built (tools/build_core.py)."""
+float64 rounding. Skipped when the package is not installed (pip install -e .)."""
 from concurrent.futures import Future
 from pathlib import Path
 import sys
@@ -58,7 +58,7 @@ def python_only():
     return patch.object(_native, "core", None)
 
 
-@unittest.skipIf(C is None, "framehands._core not built (tools/build_core.py)")
+@unittest.skipIf(C is None, "framehands._core not built (pip install -e .)")
 class CalibTests(unittest.TestCase):
     def test_camera_and_triangulation_are_exact(self):
         rng = np.random.default_rng(0)
@@ -149,7 +149,7 @@ class MercuryTests(unittest.TestCase):
             np.testing.assert_allclose(C.refine_all(hm), M.MercuryKeypoint._refine_all(hm), rtol=0, atol=TOL)
 
 
-@unittest.skipIf(C is None, "framehands._core not built (tools/build_core.py)")
+@unittest.skipIf(C is None, "framehands._core not built (pip install -e .)")
 class PalmTests(unittest.TestCase):
     def test_curls_splays_and_quaternions_are_exact(self):
         rng = np.random.default_rng(7)
@@ -192,7 +192,7 @@ class _Pool:
     pass
 
 
-@unittest.skipIf(C is None, "framehands._core not built (tools/build_core.py)")
+@unittest.skipIf(C is None, "framehands._core not built (pip install -e .)")
 class TrackerTests(unittest.TestCase):
     """collect() on the same results with the Python and the native hand state"""
 

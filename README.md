@@ -33,10 +33,10 @@ decode, palm axes, pose filters, finger curls and splays, and the per-hand Mercu
 (placement, single-view and two-view observation, acceptance). The Python modules stay the
 reference: each C++ function follows one of them in the same evaluation order.
 
-`framehands._core` binds it for Python:
+`framehands._core` binds it for Python. Installing the package builds it (scikit-build-core;
+needs a C++17 compiler), so a wheel is for one Python version and platform:
 
-    pip install pybind11
-    python tools/build_core.py
+    pip install -e .                       # run again after changing cpp/
     FRAMEHANDS_CORE=native python ...      # unset or "python": the Python reference
 
 Parity (`tests/test_core.py`): the camera model, triangulation, crop sampling map, curls,

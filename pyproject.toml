@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.11", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "framehands"
-version = "0.2.3"
+version = "0.2.4"
 description = "Steam Frame hand tracking: camera frames, Mercury detection and keypoints, temporal tracking"
 readme = "README.md"
 license = "MIT"
@@ -18,10 +18,10 @@ mediapipe = ["mediapipe"]  # framehands.detect, the legacy detector
 [project.urls]
 Source = "https://github.com/NatTheDyke/framehands"
 
-[tool.setuptools]
-packages = ["framehands"]
-
-# the C++ geometry core when it was built first (python tools/build_core.py); its file name carries
-# the interpreter and platform, so a wheel holding it imports it only where it was built
-[tool.setuptools.package-data]
-framehands = ["_core*.so"]
+# cpp/ builds framehands._core, so a wheel is for one interpreter and platform (cp314-cp314-linux_aarch64)
+[tool.scikit-build]
+minimum-version = "0.11"
+cmake.source-dir = "cpp"
+cmake.build-type = "Release"
+install.components = ["python"]
+wheel.packages = ["framehands"]

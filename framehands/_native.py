@@ -1,4 +1,4 @@
-"""The C++ geometry core (framehands._core, built from cpp/ by tools/build_core.py), opt-in.
+"""The C++ geometry core (framehands._core, built from cpp/ with the package), opt-in.
 
 FRAMEHANDS_CORE=native makes calib, mercury_kp, palm and merctrack run their geometry in the
 core (a missing module is then an error); unset or "python" keeps the Python reference. The
