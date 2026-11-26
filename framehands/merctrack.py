@@ -37,6 +37,10 @@ CURL_SCALE = (2.0, 4.0, 4.0, 4.0, 4.0)   # Mercury curl output (negative = flexe
                                          # (provisional mapping, not calibrated against ground truth)
 MAX_CROPS = 3             # crops per Mercury job (one NPU request)
 LOST_AFTER_S = 0.35       # no accepted Mercury observation for this long -> back to discovery
+ONE_VIEW_S = 0.5          # a track without a two-camera observation for this long ...
+TAKEOVER_M = 0.10         # ... gives way to a two-camera detection of its side this far from it (palm centres),
+TAKEOVER_S = 1.0          # seen twice within this long at the same place: one camera's crops are accepted
+                          # on anything, so a track can live on where no hand is, and keep the hand away
 
 
 def view_joints(P, hand_size, origin, rays, rel_depth):
@@ -59,6 +63,7 @@ class PyHandState:
         self.last_both = 0.0                      # monotonic s of the last job with both views of this hand
         self.misses = 0
         self.created = t
+        self.t_two = t                            # capture s of the last two-camera observation (a seed is one)
         self.curls_by_view = {}                   # slot -> (t, mercury curls (5,), variances (5,))
         self.geo_views = {}                       # slot -> (t, origin, rays head frame, Mercury relative depths)
 
@@ -88,6 +93,7 @@ class MercuryTracker:
         self.worker = worker                      # module with run_mercury(jobs, imgs)
         self.ring = None                          # framering.FrameRing: raw frames via shared memory (--frame-ring)
         self.hands = {}                           # side -> HandState
+        self._takeover = {}                       # side -> (t, palm centre) of a detection that may replace its track
         self.job = None
         self.job_info = {}                        # submit path / capture seq / stage times of self.job
         self.idle_future = None
@@ -127,17 +133,32 @@ class MercuryTracker:
         return np.asarray(P)[[0, 5, 9, 17]].mean(0)
 
     def seed(self, side, P, t):
-        """New 3D joints from MediaPipe discovery: start (or re-anchor) tracking this hand.
-        Never start a hand on top of the other tracked hand."""
+        """New 3D joints from a two-camera discovery: start tracking this hand. Never on top of the
+        other tracked hand; over a tracked one only when it is lost, or when it has been seen by one
+        camera alone for ONE_VIEW_S and this detection, far from it, came twice (see TAKEOVER_M).
+        Returns "new", "takeover" (a different track: callers drop what followed the old one) or None."""
         if P is None:
-            return
+            return None
         other = self.hands.get("right" if side == "left" else "left")
         if other is not None and np.linalg.norm(self.palm_c(P) - self.palm_c(other.P)) < COLLAPSE_M:
             self.stats["seed_blocked"] = self.stats.get("seed_blocked", 0) + 1
-            return
+            return None
         hs = self.hands.get(side)
         if hs is None or t - hs.t > LOST_AFTER_S:
             self.hands[side] = HandState(side, P, t)
+            self._takeover.pop(side, None)
+            return "new"
+        c = self.palm_c(P)
+        if t - hs.t_two <= ONE_VIEW_S or np.linalg.norm(c - self.palm_c(hs.P)) <= TAKEOVER_M:
+            return None
+        first = self._takeover.get(side)
+        if first is None or t - first[0] > TAKEOVER_S or np.linalg.norm(c - first[1]) > TAKEOVER_M:
+            self._takeover[side] = (t, c)
+            return None
+        self.hands[side] = HandState(side, P, t)
+        self._takeover.pop(side, None)
+        self.stats["takeovers"] = self.stats.get("takeovers", 0) + 1
+        return "takeover"
 
     def busy(self):
         return self.job is not None
@@ -407,6 +428,8 @@ class MercuryTracker:
     def _accepted(self, hs, side, slot, r, P, t, rec, job_imgs, out):
         """an accepted observation (state already updated): curls and the filtered pose"""
         self.stats["accepted"] += 1
+        if rec["outcome"] != "mono":
+            hs.t_two = t
         rec["rq"] = self.palm.raw_quat(side, P)
         hs.curls_by_view[slot] = (t, np.asarray(r["curls"], float), np.asarray(r["curl_var"], float))
         if self.curl_source == "mercury":
@@ -543,7 +566,7 @@ class MercuryTracker:
             else:
                 hs.vel = np.zeros(3)
             hs.hand_size = 0.9 * hs.hand_size + 0.1 * float(np.linalg.norm(P[0] - P[9]))
-            hs.P, hs.t, hs.misses = P, t, 0
+            hs.P, hs.t, hs.misses, hs.t_two = P, t, 0, t
             self.stats["accepted"] += 1
             self.stats["stereo"] += 1
             rec["rq"] = self.palm.raw_quat(side, P)

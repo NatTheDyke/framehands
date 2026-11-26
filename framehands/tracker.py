@@ -524,7 +524,8 @@ class HandTracker:
             if p is None or side not in self._enabled:
                 continue
             self._hand_t = max(self._hand_t, t_d)
-            self._mt.seed(side, p[3], t_d)
+            if self._mt.seed(side, p[3], t_d) == "takeover":
+                self._flow.hands.pop(side, None)       # it followed the old track
             if side not in self._mt.tracked() or self._mt.hands[side].t > t_d:
                 continue                               # refused, or tracking has a newer observation
             q = np.asarray(p[1], float)
