@@ -76,6 +76,7 @@ class World:
         self.tr, self.e, self.hands = tracker, tracker.engine, dict(hands)
         self.fail, self.keypoint_runs, self.detector_runs = None, 0, 0
         self.gate = None
+        self.peak = {}                  # side -> mean heatmap peak of its crops (absent: none returned)
         self.e.run_mercury, self.e.discover = self.run_mercury, self.discover
 
     def _wait(self):
@@ -99,6 +100,8 @@ class World:
                 r = {"rays": d / rng[:, None], "is_hand": 0.99, "curls": np.zeros(5), "curl_var": np.ones(5),
                      "rel_depth": (rng - rng[9]) / np.linalg.norm(P[0] - P[9]),
                      "det_px": self.e.source.raw_to_det(self.e.geometry.cam[slot].project(d), slot, engine.DET_SIZE)}
+                if side in self.peak:
+                    r["conf"] = np.full(21, self.peak[side])
             out.append((slot, side, r, 0.001, {"hint": hint, "inference": "cpu"}))
         return out if discover is None else {"obs": out, "discover": self._found(discover["tracked"])}
 
@@ -492,6 +495,22 @@ class WorkerTests(TrackerCase):
             self.finish(futures)
         n2 = sum(f[1] == self.w.discover or (len(f[2]) > 3 and f[2][3] is not None) for f in futures)
         self.assertGreater(n2, n)                        # long before 1 / 0.5 Hz
+
+    def test_a_hand_whose_crops_stop_fitting_a_hand_is_dropped(self):
+        self.make(presence=0.10, events=True)
+        self.w.peak = {"left": 0.3, "right": 0.3}
+        first = self.step(10)
+        self.tr.take_events()
+        self.w.peak["right"] = 0.05
+        self.step(30)
+        ev = self.tr.take_events()
+        self.assertIn(("absent", "right"), ev)
+        self.assertNotIn(("absent", "left"), ev)
+        self.assertGreaterEqual(self.tr.stats["absent"], 1)        # the detector finds it again, and again
+        self.w.peak["right"] = 0.3
+        out = self.step(30)
+        self.assertEqual(out["left"].track_id, first["left"].track_id)
+        self.assertGreater(out["right"].track_id, first["right"].track_id)   # found again as a new track
 
     def test_settings_can_change_while_running(self):
         self.make()

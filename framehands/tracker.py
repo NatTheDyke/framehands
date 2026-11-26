@@ -134,7 +134,7 @@ class HandTracker:
     def __init__(self, calibration, session=None, *, source="slam", hands=SIDES, executor=None, keypoint=None,
                  detector=None, cell_offset=None, keypoint_hz=30.0, detect_hz=7.0, idle_detect_hz=5.0,
                  redetect_hz=2.0, views="alternate", max_crops=4, curl_joint_fingers=(1,), smoothing=Smoothing(),
-                 engine=None, ring=None, preflow=False, events=False):
+                 engine=None, ring=None, preflow=False, events=False, presence=0.0):
         """calibration: a calib.Rig or the path of sensorRigCalibration.json. session: framenpu.open's,
         with a keypoint and a detector model. source: the cameras the frames come from ("slam" |
         "passthrough"). executor: None = infer inside update(). keypoint, detector, cell_offset: see
@@ -148,7 +148,9 @@ class HandTracker:
         discover are submitted to the executor, so they must be picklable; `layout` is its detector
         crop layout. ring: a framering.FrameRing that carries its camera frames. preflow: send a
         frame's keypoint job before its optical flow, placed with the previous frame's positions (the
-        job is completed with this frame's). events: keep a list of events to take with take_events()."""
+        job is completed with this frame's). events: keep a list of events to take with take_events().
+        presence: drop a hand after merctrack.PRESENCE_RUN keypoint crops in a row whose mean
+        heatmap peak is below it (0: off; 0.10 separates hand-free crops on the recordings)."""
         if views not in ("alternate", "both", "auto"):
             raise ValueError("views: alternate, both or auto")
         self.rig = calibration if hasattr(calibration, "head_from_cam") else Rig(calibration)
@@ -168,6 +170,7 @@ class HandTracker:
         self._palm = PalmTracker(DET_SIZE, rig=self.rig, source=self.source)
         self._mt = MercuryTracker(self._palm, self._jobs, self.engine)
         self._mt.views, self._mt.max_crops, self._mt.curl_geo = views, max_crops, list(curl_joint_fingers)
+        self._mt.presence = presence
         self._flow = FastTracker(self._palm, orient=False, blend_s=0.0)
         self._flow.v2 = True
         self._mt.ring = ring
@@ -458,6 +461,12 @@ class HandTracker:
             self._det_urgent = True
             self._event("collapse", mt.collapsed)
             mt.collapsed = None
+        for sd in mt.absent:                           # its crops stopped fitting a hand: look again
+            self._flow.hands.pop(sd, None)
+            self._lose(sd)
+            self._det_urgent = True
+            self._event("absent", sd)
+        mt.absent = []
         if had - set(mt.hands):
             self._det_now = True
 

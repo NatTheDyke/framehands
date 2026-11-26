@@ -37,6 +37,7 @@ CURL_SCALE = (2.0, 4.0, 4.0, 4.0, 4.0)   # Mercury curl output (negative = flexe
                                          # (provisional mapping, not calibrated against ground truth)
 MAX_CROPS = 3             # crops per Mercury job (one NPU request)
 LOST_AFTER_S = 0.35       # no accepted Mercury observation for this long -> back to discovery
+PRESENCE_RUN = 4          # crops in a row below the presence score that drop a hand
 
 
 def view_joints(P, hand_size, origin, rays, rel_depth):
@@ -58,6 +59,7 @@ class PyHandState:
         self.last_rays = {}                       # slot -> (t, origin, rays head frame, palm position at t or None)
         self.last_both = 0.0                      # monotonic s of the last job with both views of this hand
         self.misses = 0
+        self.low = 0                              # crops in a row whose mean heatmap peak was below presence
         self.created = t
         self.curls_by_view = {}                   # slot -> (t, mercury curls (5,), variances (5,))
         self.geo_views = {}                       # slot -> (t, origin, rays head frame, Mercury relative depths)
@@ -115,6 +117,12 @@ class MercuryTracker:
         self.stereo_comp = True                   # shift an older view's rays by the palm motion since its capture
         self.last_inference = "cpu"               # backend of the last result (views = auto)
         self.collapsed = None
+        # hand presence: a crop whose mean heatmap peak (the per-joint maxima, as Mercury's joint
+        # confidences) is below `presence` does not fit a hand; presence_run of them in a row for one
+        # hand drop its track (0: off). The dropped sides of the last collect are in `absent`.
+        self.presence = 0.0
+        self.presence_run = PRESENCE_RUN
+        self.absent = []
         self.next_id = 0
         self.records = []                         # per-observation timing records, drained by the caller
         self.stats = {"runs": 0, "accepted": 0, "rejected": 0, "stereo": 0, "mono": 0, "ms": []}
@@ -276,6 +284,7 @@ class MercuryTracker:
         fut, t_ns, fast_pos, job_imgs, t_sub_ns, njob = self.job
         info = self.job_info
         self.job, self.job_info = None, {}
+        self.absent = []
         disc, self.job_disc = self.job_disc, None
         t = t_ns / 1e9
         t_col_ns = time.monotonic_ns()
@@ -312,6 +321,8 @@ class MercuryTracker:
                 rec["outcome"] = "gone"
                 continue
             self.last_inference = rec["inference"]
+            if self._absent(hs, side, r, rec, out):
+                continue
             if not valid(r):
                 self.stats["rejected"] += 1
                 hs.misses += 1
@@ -403,6 +414,20 @@ class MercuryTracker:
                 self.collapsed = drop
                 self.stats["collapses"] = self.stats.get("collapses", 0) + 1
         return out
+
+    def _absent(self, hs, side, r, rec, out):
+        """Count a crop that does not fit a hand; after presence_run in a row, drop the hand."""
+        if self.presence <= 0 or r is None or r.get("conf") is None:
+            return False
+        hs.low = hs.low + 1 if float(np.mean(r["conf"])) < self.presence else 0
+        if hs.low < self.presence_run:
+            return False
+        del self.hands[side]
+        out.pop(side, None)
+        self.absent.append(side)
+        self.stats["absent"] = self.stats.get("absent", 0) + 1
+        rec["outcome"] = "absent"
+        return True
 
     def _accepted(self, hs, side, slot, r, P, t, rec, job_imgs, out):
         """an accepted observation (state already updated): curls and the filtered pose"""
